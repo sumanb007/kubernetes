@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: frontend-app-container
-        image: bsumanji/webapp-frontend
+        image: bsumanji/frontend31010-private12
         ports:
         - containerPort: 3000
 ---

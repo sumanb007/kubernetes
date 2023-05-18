@@ -3,7 +3,7 @@ kind: Deployment
 metadata:
   name: backend-app-deployment
 spec:
-  replicas: 3
+  replicas: 1
   selector:
     matchLabels:
       app: backend-app
@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: backend-app-container
-        image: bsumanji/webapp-backend
+        image: bsumanji/backend-crud-webappp
         ports:
         - containerPort: 4000
 ---
@@ -24,10 +24,10 @@ metadata:
   name: backend-app-service
 spec:
   selector:
-    app: frontend-app
+    app: backend-app
   type: NodePort
   ports:
   - name: http
-    port: 80
+    port: 5000
     targetPort: 4000
-    
+    nodePort: 31010 
