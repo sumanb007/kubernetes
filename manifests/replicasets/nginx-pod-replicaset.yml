@@ -1,0 +1,22 @@
+---
+ apiVersion: apps/v1
+ kind: ReplicaSet
+ metadata:
+   name: my-nginx
+   labels:
+     env: mynginx-replica  # this label does not matter 
+ spec:
+   selector:
+     matchLabels:
+       env: mynginx  # template labels matches this
+   replicas: 3
+   template:
+     metadata:
+       name: my-nginx
+       labels:
+         env: mynginx   # this should be matched with selector labels
+     spec:
+       containers:
+         - name: nginx-container
+           image: nginx
+
