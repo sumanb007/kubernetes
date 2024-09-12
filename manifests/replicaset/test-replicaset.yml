@@ -1,0 +1,21 @@
+---
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  name: test-replica
+  labels:
+    env: test
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      env:  testbox
+  template:
+    metadata:
+      labels:
+        env:  testbox
+    spec:
+      containers:
+        - image: busybox
+          name: test-container
+

@@ -1,0 +1,23 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-deployment
+  labels:
+    env: test-dep
+spec:
+  selector:
+    matchLabels:
+      env: testdep
+  replicas: 4
+  template:
+    metadata:
+      name: test-deployment   # this mandatorily dont have to match with Deployment.metadata.labels
+      labels:
+        env: testdep
+    spec:
+      containers:
+        - image: redis888
+          name: test-container
+
+    

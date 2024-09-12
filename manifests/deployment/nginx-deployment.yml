@@ -1,0 +1,23 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+  labels:
+    env: nginx-dep
+spec:
+  selector:
+    matchLabels:
+      env: nginxdep
+  replicas: 3
+  template:
+    metadata:
+      name: nginx-deployment   # this mandatorily dont have to match with Deployment.metadata.labels
+      labels:
+        env: nginxdep
+    spec:
+      containers:
+        - image: nginx
+          name: nginx-container
+
+    

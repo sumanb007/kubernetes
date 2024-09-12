@@ -1,0 +1,22 @@
+---
+apiVersion: apps/v1
+kind: deployment
+metadata:
+  name: redis-deployment
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      name: redis-pod
+  template:
+    metadata:
+      labels:
+        name: redis-pod
+    spec:
+      containers:
+        - name: busybox-container
+          image: redis999
+          command:
+            - sh
+            - "-c"
+            - echo Hello World! && sleep 3600
