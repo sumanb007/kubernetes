@@ -1,16 +1,31 @@
 kubectl create pod --help
 
+
 kubectl run mypod --image=nginx
 	=> imperative command to simply crate pod using image
+
 
 kubectl scale deployment httpd-frontend --replicas=5
 	=> imperative command to scale a deployment
 
+
 kubectl expose deployment httpd-frontend --port=80 --type=NodePort
 	=> imperative command to expose a service
 
+
 kubectl delete pod mypod
 	=> to delete resource
+
+
+
+kubectl delete pod nginx-deployment-858df98448-z4zkv --grace-period=0 --force
+	=> deleting stubborn pods forcefully
+or bash script
+by using bash script for all pods in deployment
+--> for pods in $(kubectl get pods | grep 'Terminating' | awk '{print $1}'); do kubectl delete pod $pods --grace-period=0 --force ; done
+
+
+
 
 kubectl create deployment nginx --image=nginx --dry-run=client -o yaml
 	=> to produce declarative configurations
