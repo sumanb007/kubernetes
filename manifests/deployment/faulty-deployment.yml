@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: faulty-deployment
+  labels:
+    env: faulty
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: faulty-app
+  template:
+    metadata:
+      labels:
+        app: faulty-app
+    spec:
+      containers:
+        - name: faulty-container
+          image: nginx:nonexistent  # Intentionally incorrect image
+
