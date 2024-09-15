@@ -1,0 +1,25 @@
+kubectl get events --field-selector involvedObject.name=nginx-recreate --output=json
+        => This command retrieves events related to the resource named my-nginx.
+
+
+
+kubectl get events --sort-by='.metadata.creationTimestamp'
+        => Sorts the kubernetes events based on time
+
+
+kubectl get events -n my-namespace --output=json
+	=> this command retreives all events in the namespace
+
+kubectl get events --field-selector involvedObject.kind=Pod --output=json
+	=> retreives all events related to pod
+
+
+kubectl get events --field-selector reason=FailedScheduling --output=json
+	=> retrieves evets related to failedScheduling
+
+
+kubectl get events --output=json | jq '.items[] | select(.firstTimestamp >= "2024-09-14T00:00:00Z" and .firstTimestamp <= "2024-09-14T23:59:59Z")'
+	=> retrieves events within the specified range of time
+
+
+
