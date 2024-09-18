@@ -5,6 +5,7 @@ metadata:
   name: nginx-deployment
   labels:
     env: nginx-dep
+    type: frontend
 spec:
   selector:
     matchLabels:
@@ -19,5 +20,3 @@ spec:
       containers:
         - image: nginx:1.14
           name: nginx-container
-
-    

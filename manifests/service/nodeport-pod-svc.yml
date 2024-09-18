@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: simple-pod
+  labels:
+    env: nginx-pod
+    type: frontend
+spec:
+  containers:
+    - image: nginx
+      name: frontend
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: simple-pod-service
+    # it can have label but we dont need it for now.
+spec:
+  type: NodePort # most crucial part
+  ports:
+    - targetPort: 80    # port on the pod
+      port: 80          # it's mandatory and is port on the service object
+      nodePort: 31000   # port on the node
+
+  selector:
+    env: nginx-pod     # these 2 lines are to match labels of Pod.metadata.labels
+    type: frontend

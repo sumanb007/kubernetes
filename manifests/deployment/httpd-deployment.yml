@@ -1,0 +1,22 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: httpd-deployment
+  labels:
+    env: httpd-dep
+    type: frontend
+spec:
+  selector:
+    matchLabels:
+      env: httpdep
+  replicas: 3
+  template:
+    metadata:
+      name: httpd-deployment   # this mandatorily dont have to match with Deployment.metadata.labels
+      labels:
+        env: httpdep
+    spec:
+      containers:
+        - image: httpd:2.4-alpine
+          name: httpd-container

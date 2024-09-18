@@ -1,0 +1,15 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-deployment-svc
+
+spec:
+  type: NodePort
+  selector:
+    env: nginxdep       # matching with ..template.metadata.labels of ../deployment/nginx-deployment.yml
+  ports:
+    - port: 80
+      targetPort: 80
+      nodePort: 31001
+

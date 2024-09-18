@@ -1,0 +1,29 @@
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: httpd-pod
+  labels:
+    env: example-pod
+    type: frontend
+
+spec:
+  containers:
+    - image: httpd:2.4-alpine
+      name: frontend
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: httpd-pod-svc
+
+spec:
+  type: ClusterIP
+  selector:               # matching with Pod.metadata.labels
+    env: example-pod
+    type: frontend
+  ports:
+    - targetPort: 80
+      port: 80
+

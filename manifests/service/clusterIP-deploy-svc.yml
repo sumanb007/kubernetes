@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: httpd-deployment-svc
+
+spec:
+  type: ClusterIP
+  selector:
+    env: httpdep       # matching with ..template.metadata.labels of ../deployment/nginx-deployment.yml
+  ports:
+    - targetPort: 80
+      port: 80
