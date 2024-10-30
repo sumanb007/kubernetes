@@ -1,6 +1,8 @@
+<div align="center">
+<h1>Kubernetes Cluster Installation</h1>
+</div>
 
-# Kubernetes Cluster Installation
-
+<img src="https://raw.githubusercontent.com/sumanb007/kubernetes/master/img/cluster.png" alt="Cluster Image" width="500" />
 
 ## Prerequisites
 Setup with 1 master nodes and 2 or more worker nodes. Each should have at least of following requirements
@@ -148,7 +150,8 @@ Setup with 1 master nodes and 2 or more worker nodes. Each should have at least 
     ```bash
     sudo kubeadm init --control-plane-endpoint=masternode.k8s.com
     ```
-	
+	<img src="https://raw.githubusercontent.com/sumanb007/kubernetes/master/img/kubeadmInit.png" alt="kubeadm" width="600" />
+ 
   - Setting Up kubectl to interact with cluster
     ```bash
     mkdir -p $HOME/.kube
@@ -162,7 +165,9 @@ Setup with 1 master nodes and 2 or more worker nodes. Each should have at least 
     ```bash
   	kubeadm join masternode.k8s.com:6443 --token jyzam4.hyu4fag0bk3t6dqk \
   	--discovery-token-ca-cert-hash sha256:6f03fe7ad1875080d3b2b9592670175466254ba6bcedf87ba0d16fa6b7a0f23a 
-    ```	
+    ```
+    <img src="https://raw.githubusercontent.com/sumanb007/kubernetes/master/img/workerJoint.png" alt="Join" width="900" />
+    
 
   - Alternatively generate token in masternode, and then execute the generated token in each worker node.
     ```bash
@@ -175,6 +180,7 @@ Setup with 1 master nodes and 2 or more worker nodes. Each should have at least 
    ```bash
    kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.26.0/manifests/calico.yaml	
    ```
+   <img src="https://raw.githubusercontent.com/sumanb007/kubernetes/master/img/calicoCNI.png" alt="Calico" width="900" />
 
 ## 10.	Name and check the nodes.
    ```bash
@@ -183,3 +189,7 @@ Setup with 1 master nodes and 2 or more worker nodes. Each should have at least 
 	 kubectl label node workernode1.k8s.com node-role.kubernetes.io/worker=
 	 kubectl label node workernode2.k8s.com node-role.kubernetes.io/worker=
    ```
+   <img src="https://raw.githubusercontent.com/sumanb007/kubernetes/master/img/nodesDetail.png" alt="nodeDetail" width="600" />
+
+   <img src="https://raw.githubusercontent.com/sumanb007/kubernetes/master/img/getPods-A.png" alt="getPods" width="600" />
+   
