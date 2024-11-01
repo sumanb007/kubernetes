@@ -22,19 +22,19 @@ Setup with 1 master nodes and 2 or more worker nodes. Each should have at least 
   
   - On masternode: 
       ```bash
-      sudo hostnamectl set-hostname masternode
+      sudo hostnamectl set-hostname masternode.k8s.com
       exec bash
       ```
   
   - On workernode1
       ```bash
-      sudo hostnamectl set-hostname workernode1
+      sudo hostnamectl set-hostname workernode1.k8s.com
       exec bash
       ```
   
   - On workernode1
       ```bash
-      sudo hostnamectl set-hostname workernode1
+      sudo hostnamectl set-hostname workernode1.k8s.com
       exec bash
       ```
 
