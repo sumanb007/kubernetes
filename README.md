@@ -203,7 +203,7 @@ Setup with 1 master nodes and 2 or more worker nodes. Each should have at least 
    <img src="https://raw.githubusercontent.com/sumanb007/kubernetes/master/img/getPods-A.png" alt="getPods" width="600" />
 
 ---
-## B. Cluster Upgrade
+## B. Cluster Upgrade 1.29.x to 1.31.x
 
 First let's note that we have version 1.29.8 as shown below:
 
