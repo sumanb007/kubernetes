@@ -4,8 +4,9 @@
 
 
 ### Contents
-A. [Cluster Setup](#A-cluster-setup)  
-B. [Cluster Upgrade 1.29.x to 1.31.x](#B-cluster-upgrade-1-29-x-to-1-31-x)
+A. [Cluster Setup](#a-cluster-setup)  
+B. [Cluster Upgrade 1.29.x to 1.31.x](#b-cluster-upgrade-129x-to-131x)
+
 
 ---
 ## A. Cluster Setup
