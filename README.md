@@ -5,7 +5,7 @@
 
 ### Contents
 A. [Cluster Setup](#a-cluster-setup)  
-B. [Cluster Upgrade 1.29.x to 1.31.x](#b-cluster-upgrade-129x-to-131x)
+B. [Cluster Upgrade 1.28.x to 1.31.x](#b-cluster-upgrade-128x-to-131x)
 
 
 ---
@@ -203,18 +203,18 @@ Setup with 1 master nodes and 2 or more worker nodes. Each should have at least 
    <img src="https://raw.githubusercontent.com/sumanb007/kubernetes/master/img/getPods-A.png" alt="getPods" width="600" />
 
 ---
-## B. Cluster Upgrade 1.29.x to 1.31.x
+## B. Cluster Upgrade 1.28.x to 1.31.x
 
-First let's note that we have version 1.29.8 as shown below:
+First let's note that we have version 1.28.15 as shown below:
 
-<img width="515" alt="currentVersion" src="https://raw.githubusercontent.com/sumanb007/kubernetes/master/img/currentVersion.png">
+<img src="https://raw.githubusercontent.com/sumanb007/kubernetes/master/img/cluster.png" alt="Cluster Image" width="500" />
 
 ### Before Moving to Upgrade [below](#procedures)
 let's note some important points to remember from the mistakes that attempted during the process.
 
 ### Attempt 1
-- Right after I canceled holds on kubeadm,kubectl and kubelet components, We directly moved to install 'v1.31.2' version.
-  Then got this error seen in screenshot. That means we need to setup package repository for v1.31.x to install components.
+- Right after canceling holds on kubeadm, kubectl, and kubelet components, the direct move to install 'v1.31.2' resulted in an error seen in the screenshot.
+  This indicates a need to set up a package repository for v1.31.x to install components.
   <img width="500" alt="pckM1" src="https://raw.githubusercontent.com/sumanb007/kubernetes/master/img/pckM1.png">
 
 - So, moved to setup packages repository for v1.31.x and continued to install kubeadm and upgrade it. Here, got to know that, upgrading to version 1.31.x only supports when current version is 1.30.x
@@ -223,10 +223,10 @@ let's note some important points to remember from the mistakes that attempted du
   <img width="1252" alt="needUpgrade130" src="https://raw.githubusercontent.com/sumanb007/kubernetes/master/img/needUpgrade130.png">
 
 ### Attempt 2
-- Next, continued installing v1.30.0 components. Again here, got to know that we need to setup package repository for v1.30.x before we install its components.
+- Next, continued installing v1.30.0 components. Again here, got to know that it's necessary to setup package repository for v1.30.x before we install its components.
   <img width="1000" alt="pckUpdate1-30" src="https://raw.githubusercontent.com/sumanb007/kubernetes/master/img/pckUpdate1-30.png">
 
-- But once you have installed components to higher version you have to 'allow downgrades' to install lower version.
+- But once installed components to higher version, we should perform 'allow downgrades' to install lower version.
   <img width="1011" alt="allow-downgrades" src="https://raw.githubusercontent.com/sumanb007/kubernetes/master/img/allow-downgrades.png">
 
 - Then upgraded to v1.30.5
@@ -234,7 +234,7 @@ let's note some important points to remember from the mistakes that attempted du
   <img width="1165" alt="upgradeSuccess" src="https://raw.githubusercontent.com/sumanb007/kubernetes/master/img/upgradeSuccess.png">
 
 ### Attempt 3
-- Finally, updated the package repository to v1.31.x and installed components. Then applied kubeadm version 1.31.2.
+- Finally, the package repository was updated to v1.31.x, components were installed and kubeadm version 1.31.2 was then applied.
   <img width="934" alt="upgrade131exec" src="https://raw.githubusercontent.com/sumanb007/kubernetes/master/img/upgrade131exec.png">
   <img width="1165" alt="upgrade131success" src="https://raw.githubusercontent.com/sumanb007/kubernetes/master/img/upgrade131success.png">
 
@@ -254,8 +254,16 @@ When upgrading Kubernetes, the general recommendation is to perform a stepwise u
 >
 > You can skip intermediate patch versions within the same minor version (for example, if you are currently on 1.30.0, you can upgrade directly to 1.30.6 if that is the latest).
 >
+> The upgrade procedure on worker nodes should be executed one node at a time or few nodes at a time, without compromising the minimum required capacity for running your workloads.
+>
+> Ideally, upgrade both the control plane and worker nodes together when moving to a new major version.
+> 
 > It's essential to review the release notes for each version for any breaking changes or additional upgrade steps required.
 
+> [!CAUTION]
+> While the direct upgrade on worker nodes may complete successfully and pods may continue to run, there is a risk of instability or unexpected behavior in the application if any features or APIs have changed between versions. It is recommended to thoroughly test all functionality post-upgrade to ensure that everything operates as intended.
+> 
+> Still, skipping versions and direct upgrade on worker nodes is not recommended.
 ---
 ## Procedures
 
@@ -266,134 +274,313 @@ When upgrading Kubernetes, the general recommendation is to perform a stepwise u
 	
 ### 2. Update Repository for v1.29.x and install components
 
+### 2.1. Control Plane
+
+- Setup the repository.
+
+    ```bash
+    curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.29/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+    ```
+
+    ```bash
+    echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.29/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
+    ```
+
+    ```bash
+    sudo apt-get update
+    ```
+
+- Check if the version is available:
+    ```bash
+    sudo apt-cache madison kubeadm kubelet kubectl
+    ```
+
+- If the latest patch version is available, proceed to upgrade:
+    ```bash
+    sudo apt install -y kubeadm=1.29.10-1.1 kubectl=1.29.10-1.1 kubelet=1.29.10-1.1
+    ```
+
+- If you are upgrading the control plane (master) node, run:
+    ```bash
+    sudo kubeadm upgrade plan
+    ```
+
+- If the plan looks good, proceed with the upgrade:
+    ```bash
+    sudo kubeadm upgrade apply v1.29.10
+    ```
+
+- After upgrading kubeadm, restart kubelet:
+    ```bash
+    sudo systemctl restart kubelet
+    ```
+
+- Verify the versions:
+    ```bash
+    kubelet --version
+    kubectl version
+    kubeadm version
+    ```
+
+
+### 2.2. Worker Nodes
+
+Let's note the running pods and nodes first.
+
+<img width="500" alt="runningPods" src="https://raw.githubusercontent.com/sumanb007/kubernetes/master/img/runningPods.png">
+
+- Execute below command in control plane.
+  ```bash
+  sudo kubeadm upgrade node
+  ```
+
+- Prepare the nodes for maintenance by marking it unschedulable and evicting the workloads:
+
+  For workernode1:
+  ```bash
+  kubectl drain workernode1.k8s.com --ignore-daemonsets --delete-emptydir-data --force
+  ```
+  For workernode2:
+  ```bash
+    kubectl drain workernode2.k8s.com --ignore-daemonsets --delete-emptydir-data --force
+  ```
+
+  Use the --force option:
+  	This will allow you to delete the pods even if they don't have a controller. However, be cautious when using this option, as it will forcefully terminate the pods, which may lead to data loss if they are running stateful applications.
+
+  <img width="1397" alt="forceDrain" src="https://raw.githubusercontent.com/sumanb007/kubernetes/master/img/forceDrain.png">
+
+
+  This is how pods and nodes run when drained successfully. All the running pods will be scheduled to another working node.
+
+  <img width="800" alt="worker1drain" src="https://raw.githubusercontent.com/sumanb007/kubernetes/master/img/worker1drain.png">
+
+  
+- Cancel hold on kubeadm, kubectl and kubelet
    ```bash
-   curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.29/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-   ```
-   ```bash
-   echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.29/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
-   ```
-   ```bash
-   sudo apt-get update
+   sudo apt-mark unhold kubeadm kubelet kubectl
    ```
    
-   Check if the version is available:
-   ```bash
-   sudo apt-cache madison kubeadm kubelet kubectl
-   ```
-   
-   If latest patch version is available, proceed to upgrade:
-   ```bash
-   sudo apt install -y kubeadm=1.29.10-1.1 kubectl=1.29.10-1.1 kubelet=1.29.10-1.1
-   ```
+- Setup the repository.
 
-   If you are upgrading the control plane (master) node, run:
-   ```bash
-   sudo kubeadm upgrade plan
-   ```
+    ```bash
+    curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.29/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+    ```
 
-   If the plan looks good, proceed with the upgrade
-   ```bash
-   sudo kubeadm upgrade apply v1.29.10
-   ```
+    ```bash
+    echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.29/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
+    ```
 
-   After upgrading kubeadm, restart kubelet:
-   ```bash
-   sudo systemctl restart kubelet
-   ```
+    ```bash
+    sudo apt-get update
+    ```
 
-   Verfify the versions
-   ```bash
-   kubelet --version
-   kubectl version
-   kubeadm version
-   ```
+- Check if the version is available:
+    ```bash
+    sudo apt-cache madison kubeadm kubelet kubectl
+    ```
 
+- If the latest patch version is available, proceed to upgrade:
+    ```bash
+    sudo apt install -y kubeadm=1.29.10-1.1 kubectl=1.29.10-1.1 kubelet=1.29.10-1.1
+    sudo systemctl daemon-reload
+    sudo systemctl restart kubelet
+    ```
+    
+- (Optional) Bring the node back online by marking it schedulable:
+    For workernode1
+    ```bash
+    kubectl uncordon workernode1.k8s.com
+    ```
+    For workernode2
+    ```bash
+    kubectl uncordon workernode2.k8s.com
+    ```
+    
 ### 3. Update Repository for v1.30.x and install components
 
-   ```bash
-   curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-   ```
-   ```bash
-   echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
-   ```
-   ```bash
-   sudo apt-get update
-   ```
-   
-   Check if the version is available:
-   ```bash
-   sudo apt-cache madison kubeadm kubelet kubectl
-   ```
-   
-   If latest patch version is available, proceed to upgrade:
-   ```bash
-   sudo apt install -y kubeadm=1.30.6-1.1 kubectl=1.30.6-1.1 kubelet=1.30.6-1.1
-   ```
+### 3.1. Control Plane
 
-   If you are upgrading the control plane (master) node, run:
-   ```bash
-   sudo kubeadm upgrade plan
-   ```
+- Setup the repository.
 
-   If the plan looks good, proceed with the upgrade
-   ```bash
-   sudo kubeadm upgrade apply v1.30.6
-   ```
+    ```bash
+    curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+    ```
 
-   After upgrading kubeadm, restart kubelet:
-   ```bash
-   sudo systemctl restart kubelet
-   ```
+    ```bash
+    echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
+    ```
 
-   Verfify the versions
-   ```bash
-   kubelet --version
-   kubectl version
-   kubeadm version
-   ```
+    ```bash
+    sudo apt-get update
+    ```
+
+- Check if the version is available:
+    ```bash
+    sudo apt-cache madison kubeadm kubelet kubectl
+    ```
+
+- If the latest patch version is available, proceed to upgrade:
+    ```bash
+    sudo apt install -y kubeadm=1.30.6-1.1 kubectl=1.30.6-1.1 kubelet=1.30.6-1.1
+    ```
+
+- If you are upgrading the control plane (master) node, run:
+    ```bash
+    sudo kubeadm upgrade plan
+    ```
+
+- If the plan looks good, proceed with the upgrade:
+    ```bash
+    sudo kubeadm upgrade apply v1.30.6
+    ```
+
+- After upgrading kubeadm, restart kubelet:
+    ```bash
+    sudo systemctl restart kubelet
+    ```
+
+- Verify the versions:
+    ```bash
+    kubelet --version
+    kubectl version
+    kubeadm version
+    ```
+
+### 3.2. Worker Nodes
+
+- Setup the repository.
+
+    ```bash
+    curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+    ```
+
+    ```bash
+    echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
+    ```
+
+    ```bash
+    sudo apt-get update
+    ```
+
+- Check if the version is available:
+    ```bash
+    sudo apt-cache madison kubeadm kubelet kubectl
+    ```
+
+- If the latest patch version is available, proceed to upgrade:
+    ```bash
+    sudo apt install -y kubeadm=1.30.6-1.1 kubectl=1.30.6-1.1 kubelet=1.30.6-1.1
+    sudo systemctl daemon-reload
+    sudo systemctl restart kubelet
+    ```
+
+- (Optional) Bring the node back online by marking it schedulable:
+    For workernode1
+    ```bash
+    kubectl uncordon workernode1.k8s.com
+    ```
+    For workernode2
+    ```bash
+    kubectl uncordon workernode2.k8s.com
+    ```
 
 ### 4. Update Repository for v1.31.x and install components
 
-   ```bash
-   curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-   ```
-   ```bash
-   echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
-   ```
-   ```bash
-   sudo apt-get update
-   ```
+### 4.1. Control plane
+
+ - Setup the repository.
+
+    ```bash
+    curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+    ```
+
+    ```bash
+    echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
+    ```
+
+    ```bash
+    sudo apt-get update
+    ```
+
+- Check if the version is available:
+    ```bash
+    sudo apt-cache madison kubeadm kubelet kubectl
+    ```
+
+- If the latest patch version is available, proceed to upgrade:
+    ```bash
+    sudo apt install -y kubeadm=1.31.2-1.1 kubectl=1.31.2-1.1 kubelet=1.31.2-1.1
+    ```
+
+- If you are upgrading the control plane (master) node, run:
+    ```bash
+    sudo kubeadm upgrade plan
+    ```
+
+- If the plan looks good, proceed with the upgrade:
+    ```bash
+    sudo kubeadm upgrade apply v1.31.2
+    ```
+
+- After upgrading kubeadm, restart kubelet:
+    ```bash
+    sudo systemctl restart kubelet
+    ```
+
+- Verify the versions:
+    ```bash
+    kubelet --version
+    kubectl version
+    kubeadm version
+    ```
+    
+### 4.2. Worker Nodes
+
+- Setup the repository.
+
+    ```bash
+    curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+    ```
+
+    ```bash
+    echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
+    ```
+
+    ```bash
+    sudo apt-get update
+    ```
+
+- Check if the version is available:
+    ```bash
+    sudo apt-cache madison kubeadm kubelet kubectl
+    ```
+
+- If the latest patch version is available, proceed to upgrade:
+    ```bash
+    sudo apt install -y kubeadm=1.31.2-1.1 kubectl=1.31.2-1.1 kubelet=1.31.2-1.1
+    sudo systemctl daemon-reload
+    sudo systemctl restart kubelet
+    ```
+
+- (Necessary) As this is the final version we are updating, we need to execute below commands to bring the node back online by marking it schedulable:
+    For workernode1
+    ```bash
+    kubectl uncordon workernode1.k8s.com
+    ```
+    For workernode2
+    ```bash
+    kubectl uncordon workernode2.k8s.com
+    ```
+### Finally
+### Control Plane after upgrade:
    
-   Check if the version is available:
-   ```bash
-   sudo apt-cache madison kubeadm kubelet kubectl
-   ```
+   <img width="800" alt="finalUpdate" src="https://raw.githubusercontent.com/sumanb007/kubernetes/master/img/finalUpdate.png">
+
+### Workernode1 after upgrade
    
-   If latest patch version is available, proceed to upgrade:
-   ```bash
-   sudo apt install -y kubeadm=1.31.2-1.1 kubectl=1.31.2-1.1 kubelet=1.31.2-1.1
-   ```
+   <img width="800" alt="podsafteruncordon1" src="https://raw.githubusercontent.com/sumanb007/kubernetes/master/img/podsafteruncordon1.png">
 
-   If you are upgrading the control plane (master) node, run:
-   ```bash
-   sudo kubeadm upgrade plan
-   ```
+### Workernode2 after upgrade
 
-   If the plan looks good, proceed with the upgrade
-   ```bash
-   sudo kubeadm upgrade apply v1.31.2
-   ```
-
-   After upgrading kubeadm, restart kubelet:
-   ```bash
-   sudo systemctl restart kubelet
-   ```
-
-   Verfify the versions
-   ```bash
-   kubelet --version
-   kubectl version
-   kubeadm version
-   ```
-
-   <img width="610" alt="finalUpdate" src="https://github.com/user-attachments/assets/65e0024d-a5a7-4200-bbf3-4fba2ac484d6">
+   <img width="800" alt="podsafteruncordon2" src="https://raw.githubusercontent.com/sumanb007/kubernetes/master/img/podsafteruncordon2.png">
