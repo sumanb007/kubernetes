@@ -5,8 +5,8 @@
 
 ### Contents
 A. [Cluster Setup](#a-cluster-setup)  
-B. [Cluster Upgrade 1.28.x to 1.31.x](#b-cluster-upgrade-128x-to-131x)
-
+B. [Cluster Upgrade 1.28.x to 1.31.x](#b-cluster-upgrade-128x-to-131x)  
+C. [Etcd Setup](#c-etcd-setup)
 
 ---
 ## A. Cluster Setup
@@ -584,3 +584,53 @@ Let's note the running pods and nodes first.
 ### Workernode2 after upgrade
 
    <img width="800" alt="podsafteruncordon2" src="https://raw.githubusercontent.com/sumanb007/kubernetes/master/img/podsafteruncordon2.png">
+
+---
+
+## C. Etcd Setup
+
+Refer to the official [link](https://etcd.io/docs/v3.5/install/) for installation and new releases.
+
+### 1. Install Prerequisites
+   Ensure you have Go installed. etcd requires Go version 1.20 or higher, so update if necessary.
+
+   ```bash
+   wget https://go.dev/dl/go1.21.0.linux-amd64.tar.gz
+   sudo rm -rf /usr/local/go
+   sudo tar -C /usr/local -xzf go1.21.0.linux-amd64.tar.gz
+   export PATH=/usr/local/go/bin:$PATH
+   ```
+
+   Confirm that the correct Go version is now in use.
+   ```bash
+   go version
+   ```
+
+
+### 2. Download the etcd Source Code 
+   Clone the etcd repository from GitHub or download the source code.
+   
+   ```bash
+   git clone https://github.com/etcd-io/etcd.git
+   cd etcd
+   ```
+
+### 3. Build etcd and verify the version
+
+   ```bash
+   ./build.sh
+   etcdctl version
+   ```
+
+### 4. (Optional) To run etcd, etcdctl, and etcdutl commands from anywhere, you can add the bin directory to your PATH:
+
+   ```bash
+   export PATH=$PATH:$(pwd)/bin
+   ```
+
+### 5. Testing
+
+   ```bash
+   etcdctl put key1 "Hello etcd"
+   etcdctl get key1
+   ```
