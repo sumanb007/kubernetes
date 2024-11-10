@@ -1,4 +1,4 @@
-# Complete Demonstration of Setting Up an Ingress in a Kubernetes Cluster
+# Demonstration: Setting Up an Ingress in a Kubernetes Cluster (Bare Metal)
 
 This guide demonstrates how to set up an Ingress in a Kubernetes cluster. The process covers deploying services, configuring an Ingress resource, and setting up an Ingress Controller using the NGINX Ingress Controller as an example.
 
@@ -16,6 +16,8 @@ First, let’s install the NGINX Ingress Controller in your cluster. You can use
 kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/cloud/deploy.yaml
 #kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.12.0-beta.0/deploy/static/provider/baremetal/deploy.yaml
 ```
+
+<img src="https://raw.githubusercontent.com/sumanb007/kubernetes/master/img/nginx-controller.png" alt="kubeadm" width="800" />
 
 It may take a few moments for all the components (e.g., the ingress-nginx-controller pod) to start up. You can check the status of the pods with:
 
@@ -111,12 +113,13 @@ spec:
     targetPort: 5678
 ```
 
-Apply this configuration:
+Apply this configuration
+
 ```bash
 kubectl apply -f app2-deployment.yaml
 ```
 
-## 3. Create Ingress Resource
+## 3. Path based Ingress Resource
 
 Now that app1 and app2 services are running, we’ll create an Ingress resource to expose them. In this example, we’ll route requests based on the path:
 
@@ -155,12 +158,12 @@ spec:
 ```
 
 Run the ingress manifest
-``bash
+```bash
 kubectl apply -f ingress.yaml
 ```
 
 And verify
-``bash
+```bash
 kubectl describe ingress example-ingress
 ```
 
@@ -183,17 +186,22 @@ kubectl get all -n metallb-system
 
 After applying MetalLB, MetalLB will assign an external IP from the specified range to ingress-nginx-controller.
 
+<img src="https://raw.githubusercontent.com/sumanb007/kubernetes/master/img/metallb.png" alt="kubeadm" width="900" />
+
 ## 5. Commands to Try
 
 For  HTTP:
-curl http://<node-port-ip>:30686/app1
-curl http://<node-port-ip>:30686/app2
-These should work for HTTP without SSL errors.
+
+	curl http://<node-port-ip>:30686/app1
+	curl http://<node-port-ip>:30686/app2
+	These should work for HTTP without SSL errors.
 
 For HTTPS:
-curl -k https://<node-port-ip>:30133/app1
-curl -k https://<node-port-ip>:30133/app2
 
+	curl -k https://<node-port-ip>:30133/app1
+	curl -k https://<node-port-ip>:30133/app2
+
+<img src="https://raw.githubusercontent.com/sumanb007/kubernetes/master/img/path-based.png" alt="kubeadm" width="900" />
 
 ## 6. (Optional) Add Host-Based Routing
 
@@ -234,8 +242,9 @@ spec:
 
 
 Update /etc/hosts
-192.168.0.11 app1.example.com
-192.168.0.11 app2.example.com
+
+	192.168.0.11 app1.example.com
+	192.168.0.11 app2.example.com
 
 
 And then apply config map.
