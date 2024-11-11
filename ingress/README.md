@@ -145,7 +145,7 @@ Verify the application accesibilty and curl the service IP
 kubectl get svc app2k
 ```
 
-## 3. Path based Ingress Resource
+## 3. Path based Routing
 
 Now that app1 and app2 services are running, we’ll create an Ingress resource to expose them. In this example, we’ll route requests based on the path:
 
@@ -238,7 +238,7 @@ For Ingress with NodePort IP looks like below:
 
 <img src="https://raw.githubusercontent.com/sumanb007/kubernetes/master/img/path-based.png" alt="kubeadm" width="900" />
 
-## 6. (Optional) Add Host-Based Routing
+## 6. Host-Based Routing
 
 ```yaml
 #ingress-resource-host-based.yaml
@@ -309,3 +309,130 @@ Finally you can access:
 - app2 at `curl http://app2.example.com`
 
 <img src="https://raw.githubusercontent.com/sumanb007/kubernetes/master/img/host-verify.png" alt="kubeadm" width="600" />
+
+## 7. Round Robin in LoadBalancer
+
+Create a Combined Service for Round-Robin.
+This service, combined-apps, will act as a backend for the host application.example.com and will include both app1 and app2 endpoints.
+
+```yaml
+# combined-app-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: combined-apps
+  namespace: default
+spec:
+  ports:
+    - port: 80
+      targetPort: 5678
+  selector:
+    apps: combined
+```
+
+Add a common label to both app1 and app2 deployments so that they can be selected by combined-apps. Update app1 and app2 deployment YAML files like this:
+
+For `spec` section of app1-deployment.yaml
+
+```yaml
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: app1
+  template:
+    metadata:
+      labels:
+        app: app1
+        apps: combined   # Add this common label
+    spec:
+      containers:
+      - name: app1
+        image: hashicorp/http-echo
+        args:
+        - "-text=Hello from app1"
+        ports:
+        - containerPort: 5678
+```
+
+For `spec` section of app2-deployment.yaml
+
+```yaml
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: app2
+  template:
+    metadata:
+      labels:
+        app: app2
+        apps: combined   # Add this common label
+    spec:
+      containers:
+      - name: app2
+        image: hashicorp/http-echo
+        args:
+        - "-text=Hello from app2"
+        ports:
+        - containerPort: 5678
+```
+
+Update the Ingress to route application.example.com to the combined-apps service, enabling round-robin load balancing between app1 and app2.
+
+```yaml
+# ingress-resource-combined-host.yaml
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: example-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: app1.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: app1
+            port:
+              number: 80
+  - host: app2.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: app2
+            port:
+              number: 80
+  - host: application.example.com # New host for round-robin
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: combined-apps  # Backend service with round-robin to app1 and app2
+            port:
+              number: 80
+```
+
+Update /etc/hosts
+
+	# /etc/hosts
+ 	192.168.0.240 application.example.com
+
+And verify
+```bash
+curl http://application.example.com
+```
+The expected output is:
+
+<img src="https://raw.githubusercontent.com/sumanb007/kubernetes/master/img/roudrobin-output.png" alt="kubeadm" width="600" />
