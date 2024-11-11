@@ -1,4 +1,4 @@
-# Demonstration: Setting Up an Ingress in a Kubernetes Cluster (Bare Metal)
+# Demonstration: Setting Up an Ingress in a Kubernetes Cluster (MetalLB)
 
 This guide demonstrates how to set up an Ingress in a Kubernetes cluster. The process covers deploying services, configuring an Ingress resource, and setting up an Ingress Controller using the NGINX Ingress Controller as an example.
 
@@ -14,18 +14,31 @@ First, let’s install the NGINX Ingress Controller in your cluster. You can use
 
 ```bash
 kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/cloud/deploy.yaml
-#kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.12.0-beta.0/deploy/static/provider/baremetal/deploy.yaml
+
+#For bare metal
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.12.0-beta.0/deploy/static/provider/baremetal/deploy.yaml
 ```
 
-<img src="https://raw.githubusercontent.com/sumanb007/kubernetes/master/img/nginx-controller.png" alt="kubeadm" width="800" />
+<img src="https://raw.githubusercontent.com/sumanb007/kubernetes/master/img/nginx-controller-2.png" alt="kubeadm" width="800" />
 
-It may take a few moments for all the components (e.g., the ingress-nginx-controller pod) to start up. You can check the status of the pods with:
+It may take a few moments for all the components (e.g., the ingress-nginx-controller pod) to start up. You can check the status of the pods and services with:
 
 ```bash
 kubectl get pods -n ingress-nginx
+kubectl get svc -n ingress-nginx
 ```
 
-## 2. Create Example Services
+<img src="https://raw.githubusercontent.com/sumanb007/kubernetes/master/img/nginx-status.png" alt="kubeadm" width="600" />
+
+As we are running LoadBalancer to expose application out of cluster, let's modify controller service type NodePort to LoadBalancer
+
+```bash
+kubectl edit svc -n ingress-nginx ingress-nginx-controller
+# Verify Change
+kubectl get svc -n ingress-nginx
+```
+
+## 2. Deploy Example Services
 
 Let's deploy two simple services with deployments: app1 and app2. These services will run in the default namespace, and we’ll use Ingress to route traffic to them.
 
@@ -74,6 +87,13 @@ Apply this configuration:
 kubectl apply -f app1-deployment.yaml
 ```
 
+Verify the application accesibilty and curl the service IP 
+
+```bash
+kubectl get svc app1
+```
+
+
 Deploy2: app2
 
 ```yaml
@@ -119,12 +139,18 @@ Apply this configuration
 kubectl apply -f app2-deployment.yaml
 ```
 
+Verify the application accesibilty and curl the service IP 
+
+```bash
+kubectl get svc app2k
+```
+
 ## 3. Path based Ingress Resource
 
 Now that app1 and app2 services are running, we’ll create an Ingress resource to expose them. In this example, we’ll route requests based on the path:
 
-	- /app1 will route to app1 service.
-	- /app2 will route to app2 service.
+- /app1 will route to app1 service.
+- /app2 will route to app2 service.
 
 ```yaml
 #ingress-resource-path-based.yaml
@@ -159,15 +185,22 @@ spec:
 
 Run the ingress manifest
 ```bash
-kubectl apply -f ingress.yaml
+kubectl apply -f ingress-resource-path-based.yaml
 ```
 
 And verify
 ```bash
 kubectl describe ingress example-ingress
+kubectl get ingress --watch
 ```
+<img src="https://raw.githubusercontent.com/sumanb007/kubernetes/master/img/path-resource.png" alt="kubeadm" width="600" />
 
-## 4. Fixing service type.
+The asterisk (*) in the output indicates that the Ingress is configured to accept requests from any host. 
+Any incoming request that matches the defined paths (/app1, /app2) will be processed by the Ingress, regardless of the domain name (hostname) used.
+
+This is common when the Ingress is used to route traffic based on paths rather than specific hosts.
+
+## 4. Fixing service type with MetalLB
 
 Some Kubernetes setups on-premises or on unsupported cloud providers can’t assign an external IP automatically for LoadBalancer services.
 
@@ -183,23 +216,25 @@ Verify all the resources:
 ```bash
 kubectl get all -n metallb-system
 ```
+<img src="https://raw.githubusercontent.com/sumanb007/kubernetes/master/img/metallb.png" alt="kubeadm" width="700" />
 
-After applying MetalLB, MetalLB will assign an external IP from the specified range to ingress-nginx-controller.
+After installing MetalLB, edit the MetalLB ConfigMap to specify the IP range:
 
-<img src="https://raw.githubusercontent.com/sumanb007/kubernetes/master/img/metallb.png" alt="kubeadm" width="900" />
+```bash
+kubectl apply -f ingress/metallb-config.yaml
+```
 
-## 5. Commands to Try
+Applying this ConfigMap, any LoadBalancer service in your Kubernetes setup (like your ingress-nginx-controller) will receive an IP from this range, making the service accessible locally at that IP address.
 
-For  HTTP:
+<img src="https://raw.githubusercontent.com/sumanb007/kubernetes/master/img/metalLB-edit.png" alt="kubeadm" width="700" />
 
-	curl http://<node-port-ip>:30686/app1
-	curl http://<node-port-ip>:30686/app2
-	These should work for HTTP without SSL errors.
+## 5. Verify the applications
 
-For HTTPS:
+With MetalLB configured, the assigned IP (192.168.0.240) will act as the external IP, allowing you to access the services via the ingress controller.
 
-	curl -k https://<node-port-ip>:30133/app1
-	curl -k https://<node-port-ip>:30133/app2
+<img src="https://raw.githubusercontent.com/sumanb007/kubernetes/master/img/path-verify.png" alt="kubeadm" width="600" />
+
+For Ingress with NodePort IP looks like below:
 
 <img src="https://raw.githubusercontent.com/sumanb007/kubernetes/master/img/path-based.png" alt="kubeadm" width="900" />
 
