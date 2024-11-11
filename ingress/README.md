@@ -278,29 +278,34 @@ spec:
 
 Update /etc/hosts
 
-	192.168.0.11 app1.example.com
-	192.168.0.11 app2.example.com
+	192.168.0.240 app1.example.com
+	192.168.0.240 app2.example.com
 
 
 And then apply config map.
 This ConfigMap is configuring MetalLB to provide LoadBalancer functionality for your Kubernetes cluster on a local network.
 
 ```yaml
-apiVersion: v1
-kind: ConfigMap
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
 metadata:
+  name: my-ip-pool
   namespace: metallb-system
-  name: config
-data:
-  config: |
-    address-pools:
-    - name: default
-      protocol: layer2
-      addresses:
-      - 192.168.0.240-192.168.0.250  # Replace with an appropriate IP range for your network
+spec:
+  addresses:
+  - 192.168.0.240-192.168.0.250
+
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: example
+  namespace: metallb-system
 ```
 
 Finally you can access:
 
 - app1 at `curl http://app1.example.com`
 - app2 at `curl http://app2.example.com`
+
+<img src="https://raw.githubusercontent.com/sumanb007/kubernetes/master/img/host-verify.png" alt="kubeadm" width="600" />
