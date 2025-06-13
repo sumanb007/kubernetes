@@ -635,7 +635,7 @@ Refer to the official [link](https://etcd.io/docs/v3.5/install/) for installatio
    etcdctl put key1 "Hello etcd"
    etcdctl get key1
    ```
---
+---
 ## D. Setting Up Cluster to Trust Private Registry with TLS
 
 ### 1. Add Registry Certificate to All Nodes
@@ -644,7 +644,7 @@ On EVERY node (master + workers):
 ```bash
 # 1. Copy the registry certificate to the node
 #    (Replace with your actual certificate path)
-sudo scp user@192.168.1.110:/mnt/sdb2-partition/certs/domain.crt /usr/local/share/ca-certificates/192.168.1.110.crt
+sudo scp bsuman@192.168.1.110:/mnt/sdb2-partition/certs/domain.crt /usr/local/share/ca-certificates/192.168.1.110.crt
 
 # 2. Update CA certificates
 sudo update-ca-certificates
@@ -662,8 +662,19 @@ If you don't have jq, you can do:
 ```
 kubectl get node <node-name> -o jsonpath='{.status.nodeInfo.containerRuntimeVersion}'
 ```
+### Why don't we need to modify `containerd/config.toml`?
 
-### 2. Configure Container Runtime to Trust Registry
+- By default, containerd uses the system's root CA set (located in `/etc/ssl/certs`). When we run `update-ca-certificates`, it updates the system's CA bundle, and containerd will trust any certificate signed by these CAs.
+
+### What if we had a registry that uses a self-signed certificate and we don't want to add it to the system's trust store?
+
+- Then we would have to configure containerd specifically for that registry by setting the `ca_file` in the `config.toml` as shown earlier. But in this case, we did the system-wide trust which is simpler and worked.
+
+### Note
+
+If Kubernetes nodes did not trust the self-signed certificate of the private Docker registry. The solution would be to add the registry's certificate to the system trust store on every node and restart containerd and kubelet.
+
+### 2. (Optional) Configure Container Runtime to Trust Registry
 
 Edit the container runtime config on each node:
 
@@ -705,3 +716,54 @@ Since our cluster uses containerd runtime lets verify if image exists.
 ```bash
 sudo ctr images ls
 ```
+
+### 4. Create Image Pull Secret (Optional)
+
+If the registry requires authentication:
+```bash
+kubectl create secret docker-registry regcred \
+  --docker-server=192.168.1.110:5050 \
+  --docker-username=<your-username> \
+  --docker-password=<your-password> \
+  --namespace=default
+```
+
+### 5. Update Deployment YAML
+
+Modify frontend-deploy.yml to use the secret:
+```bash
+spec:
+  containers:
+  - image: 192.168.1.110:5050/frontend-crud-webapp:minimal
+    name: frontend-crud-webapp
+  imagePullSecrets:  # Add this section
+  - name: regcred
+```
+
+Finally redeploy application and verify.
+
+### Key Notes:
+
+### 1. Certificate Distribution
+The registry's certificate (domain.crt) must be installed on all nodes in:
+```
+/usr/local/share/ca-certificates/
+```
+### 2. Firewall Rules
+Ensure all nodes can access 192.168.1.110:5050:
+```bash
+sudo ufw allow from 192.168.1.0/24 to any port 5050
+```
+
+### 3. Registry Health Check
+Verify registry accessibility:
+```bash
+curl -k https://192.168.1.110:5050/v2/_catalog
+```
+
+### 4. Image Naming Convention
+Always use full registry path in deployments:
+```yaml
+image: 192.168.1.110:5050/image-name:tag
+```
+
