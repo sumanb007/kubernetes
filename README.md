@@ -1,12 +1,13 @@
 <div align="center">
-<h1>Kubernetes Cluster Installation and Upgrade</h1>
+<h1>Kubernetes Cluster Setup</h1>
 </div>
 
 
-### Contents
+### Contents  
 A. [Cluster Setup](#a-cluster-setup)  
 B. [Cluster Upgrade 1.28.x to 1.31.x](#b-cluster-upgrade-128x-to-131x)  
-C. [Etcd Setup](#c-etcd-setup)
+C. [Etcd Setup](#c-etcd-setup)  
+D. [Setting Up Cluster to Trust Private Registry with TLS](#d-setting-up-cluster-to-trust-private-registry-with-tls)
 
 ---
 ## A. Cluster Setup
@@ -634,3 +635,73 @@ Refer to the official [link](https://etcd.io/docs/v3.5/install/) for installatio
    etcdctl put key1 "Hello etcd"
    etcdctl get key1
    ```
+--
+## D. Setting Up Cluster to Trust Private Registry with TLS
+
+### 1. Add Registry Certificate to All Nodes
+
+On EVERY node (master + workers):
+```bash
+# 1. Copy the registry certificate to the node
+#    (Replace with your actual certificate path)
+sudo scp user@192.168.1.110:/mnt/sdb2-partition/certs/domain.crt /usr/local/share/ca-certificates/192.168.1.110.crt
+
+# 2. Update CA certificates
+sudo update-ca-certificates
+
+# 3. Restart container runtime and kubelet
+sudo systemctl restart containerd  # or docker if using Docker
+sudo systemctl restart kubelet
+```
+
+First check which runtime is cluster using
+```bash
+kubectl get node <node-name> -o json | jq '.status.nodeInfo.containerRuntimeVersion'
+```
+If you don't have jq, you can do:
+```
+kubectl get node <node-name> -o jsonpath='{.status.nodeInfo.containerRuntimeVersion}'
+```
+
+### 2. Configure Container Runtime to Trust Registry
+
+Edit the container runtime config on each node:
+
+For containerd (/etc/containerd/config.toml):
+
+```toml
+[plugins."io.containerd.grpc.v1.cri".registry.configs."192.168.1.110:5050".tls]
+  insecure_skip_verify = false  # Keep false since we added the cert
+```
+
+For Docker
+
+```json
+{
+  "insecure-registries": [],
+  "registry-mirrors": [],
+  "exec-opts": ["native.cgroupdriver=systemd"],
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "100m"
+  }
+}
+```
+Restart the runtime
+
+```bash
+sudo systemctl restart containerd && sudo systemctl restart kubelet
+```
+
+### 3. Verify Access on Nodes
+
+Test image pulling manually on each node:
+```bash
+sudo ctr image pull 192.168.1.110:5050/frontend-crud-webapp:minimal
+# Should show: "successfully pulled"
+```
+
+Since our cluster uses containerd runtime lets verify if image exists.
+```bash
+sudo ctr images ls
+```
