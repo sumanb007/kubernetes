@@ -1,21 +1,25 @@
-## Orchestrating Application
+# Orchestrating Application Container
 
-Now let's continue further to orchestrate [Application](https://github.com/sumanb007/crud-webapplication/blob/main/README.md) in Kubernetes.
+Now let's continue further to orchestrate [Application](https://github.com/sumanb007/crud-webapplication/blob/main/README.md) containers using Kubernetes.
 
-As planned in project, let's first ensure:
-1. NFS is setup in every cluster host. (like [here](https://github.com/sumanb007/Labs/blob/main/NFS%20setup.md))
-2. Cluster set up to Trust Private Registry with TLS. (like [here](https://github.com/sumanb007/kubernetes/blob/master/README.md#d-setting-up-cluster-to-trust-private-registry-with-tls))
+As planned in project, let's first:
+1. Design Cluster. (as shown in the [link](https://github.com/sumanb007/kubernetes?tab=readme-ov-file#a-cluster-setup)
+2. Ensure NFS is setup in every cluster host. (like [here](https://github.com/sumanb007/Labs/blob/main/NFS%20setup.md))
+3. Cluster set up to Trust Private Registry with TLS. (like [here](https://github.com/sumanb007/kubernetes/blob/master/README.md#d-setting-up-cluster-to-trust-private-registry-with-tls))
 
 ### Table of Conents
-1 Designing Kubernetes Architecture  
-2 Creating Deployment and Service YAMLs  
-3 Setting Up Persistent Volumes with NFS  
-4 Ingress and TLS  
-5 Testing the Cluster  
-6 Scaling and Resource Limits  
-7 CI/CD Integration (Optional)  
+1. [Creating Deployment and Service YAMLs](#2-creating-deployment-and-service-yamls)
+2. [Setting Up Persistent Volumes with NFS](#3-setting-up-persistent-volumes-with-NFS)
+3. [Ingress and TLS](#4-ingress-and-tls)
+4. [Testing the Cluster](#5-testing-the-cluster)
+5. [Scaling and Resource Limits](#6-scaling-and-resource)  
 
-# (To be continued..)
+---
+
+1. Creating Deployment and Service YAMLs
+   
+   
+3. 
 
 #Raw ideas
 
