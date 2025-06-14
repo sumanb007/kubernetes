@@ -1,33 +1,42 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: backend-app-deployment
+  creationTimestamp: null
+  labels:
+    app: backend
+  name: backend
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: backend-app
+      app: backend
+  strategy: {}
   template:
     metadata:
+      creationTimestamp: null
       labels:
-        app: backend-app
+        app: backend
     spec:
       containers:
-      - name: backend-app-container
-        image: bsumanji/backend-crud-webappp
-        ports:
-        - containerPort: 4000
+      - image: 192.168.1.110:5050/backend-crud-webapp:minimal
+        name: backend-crud-webapp
+        resources: {}
+status: {}
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: backend-app-service
+  creationTimestamp: null
+  labels:
+    app: backend
+  name: backend
 spec:
-  selector:
-    app: backend-app
-  type: NodePort
   ports:
-  - name: http
-    port: 5000
+  - port: 5000
+    protocol: TCP
     targetPort: 4000
-    nodePort: 31010 
+  selector:
+    app: backend
+  type: ClusterIP
+status:
+  loadBalancer: {}
