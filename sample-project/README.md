@@ -29,9 +29,7 @@ As planned in project, let's first:
 Let's generate yaml using imperative command and modify it.
 
 ```bash
-kubectl create deployment frontend \
-  --image=192.168.1.110:5050/frontend-crud-webapp:minimal \
-  --dry-run=client -o yaml > frontend-deploy.yaml
+kubectl create deployment frontend --image=192.168.1.110:5050/frontend-crud-webapp:minimal --dry-run=client -o yaml > frontend-deploy.yaml
 ```
 
 
@@ -72,11 +70,7 @@ kubectl get pods -l app=frontend
 
 Expose the pod using ClusterIP service.
 ```bash
-kubectl expose deployment frontend \
-  --port=80 \
-  --target-port=3000 \
-  --type=ClusterIP \
-  --dry-run=client -o yaml > frontend-service.yaml
+kubectl expose deployment frontend--port=80 --target-port=3000 --type=ClusterIP --dry-run=client -o yaml > frontend-service.yaml
 ```
 
 Verify service
@@ -89,9 +83,7 @@ kubectl describe svc frontend
 Similarly for backend, lets continue from imperative command modify.
 
 ```bash
-kubectl create deployment backend \
-  --image=192.168.1.110:5050/backend-crud-webapp:minimal \
-  --dry-run=client -o yaml > backend-deployment.yaml
+kubectl create deployment backend--image=192.168.1.110:5050/backend-crud-webapp:minimal --dry-run=client -o yaml > backend-deployment.yaml
 ```
 ```yaml
 apiVersion: apps/v1
@@ -130,24 +122,11 @@ kubectl get pods -l app=backend
 
 Expose the pod using ClusterIP service.
 ```bash
-kubectl expose deployment backend \
-  --name=backend \
-  --port=5000 \
-  --target-port=4000 \
-  --type=ClusterIP \
-  --dry-run=client -o yaml > backend-service.yaml
+kubectl expose deployment backend --name=backend --port=5000 --target-port=4000  --type=ClusterIP  --dry-run=client -o yaml > backend-service.yaml
 ```
 #Raw ideas
 
-5.2 Creating Deployment & Service YAMLs
 
-Deployments: replicas, rollingUpdate strategy, revisionHistoryLimit.
-Services: ClusterIP vs NodePort vs LoadBalancer; targetPort vs port.
-ConfigMaps & Secrets: envFrom/volumes patterns; secret mounts for TLS certs or DB creds.
-Health probes: liveness vs readiness vs startup probes.
-Labels & selectors: logical grouping, version labels for canary deploys.
-Resource requests/limits (prep for 5.6).
-Snippet examples for each.
 5.3 Setting Up Persistent Volumes with NFS
 
 Static vs dynamic provisioning; highlight StorageClass.
