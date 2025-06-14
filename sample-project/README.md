@@ -1,11 +1,11 @@
-# Orchestrating Application Container
+# Orchestrating Containerized Application
 
 Now let's continue further to orchestrate [Application](https://github.com/sumanb007/crud-webapplication/blob/main/README.md) containers using Kubernetes.
 
 As planned in project, let's first:
-1. Design Cluster. (as shown in the [link](https://github.com/sumanb007/kubernetes?tab=readme-ov-file#a-cluster-setup)
+1. Design Cluster. (as shown in this [link](https://github.com/sumanb007/kubernetes?tab=readme-ov-file#a-cluster-setup))
 2. Ensure NFS is setup in every cluster host. (like [here](https://github.com/sumanb007/Labs/blob/main/NFS%20setup.md))
-3. Cluster set up to Trust Private Registry with TLS. (like [here](https://github.com/sumanb007/kubernetes/blob/master/README.md#d-setting-up-cluster-to-trust-private-registry-with-tls))
+3. Setup Cluster to Trust Private Registry with TLS. (like [here](https://github.com/sumanb007/kubernetes/blob/master/README.md#d-setting-up-cluster-to-trust-private-registry-with-tls))
 
 ### Table of Conents
 1. [Creating Deployment and Service YAMLs](#2-creating-deployment-and-service-yamls)
@@ -16,11 +16,127 @@ As planned in project, let's first:
 
 ---
 
-1. Creating Deployment and Service YAMLs
-   
-   
-3. 
+## 1. Creating Deployment and Service YAMLs
 
+### Plan:
+   - Frontend exposed outside of cluster using ingress.
+   - Backend exposed inside cluster
+   - Mongodb exposed inside cluster.
+   - Ingress to handle traffic to frontend and backend.
+
+### Frontend yaml
+
+Let's generate yaml using imperative command and modify it.
+
+```bash
+kubectl create deployment frontend \
+  --image=192.168.1.110:5050/frontend-crud-webapp:minimal \
+  --dry-run=client -o yaml > frontend-deploy.yaml
+```
+
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  creationTimestamp: null
+  labels:
+    app: frontend
+  name: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  strategy: {}
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: frontend
+    spec:
+      containers:
+      - image: 192.168.1.110:5050/frontend-crud-webapp:minimal
+        name: frontend-crud-webapp-container
+        resources: {}
+status: {}
+```
+Apply the deployment and verify
+```bash
+kubectl apply -f frontend-deploy.yaml
+kubectl get deployment frontend
+kubectl describe deployment frontend
+kubectl get pods -l app=frontend
+```
+
+
+Expose the pod using ClusterIP service.
+```bash
+kubectl expose deployment frontend \
+  --port=80 \
+  --target-port=3000 \
+  --type=ClusterIP \
+  --dry-run=client -o yaml > frontend-service.yaml
+```
+
+Verify service
+```bash
+kubectl get svc frontend
+kubectl describe svc frontend
+```
+
+### Backend yaml
+Similarly for backend, lets continue from imperative command modify.
+
+```bash
+kubectl create deployment backend \
+  --image=192.168.1.110:5050/backend-crud-webapp:minimal \
+  --dry-run=client -o yaml > backend-deployment.yaml
+```
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  creationTimestamp: null
+  labels:
+    app: backend
+  name: backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  strategy: {}
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: backend
+    spec:
+      containers:
+      - image: 192.168.1.110:5050/backend-crud-webapp:minimal
+        name: backend-crud-webapp
+        resources: {}
+status: {}
+```
+
+Apply the deployment and verify.
+```bash
+kubectl apply -f backend-deployment.yaml
+kubectl get deployments
+kubectl describe deployment backend
+kubectl get pods -l app=backend
+```
+
+Expose the pod using ClusterIP service.
+```bash
+kubectl expose deployment backend \
+  --name=backend \
+  --port=5000 \
+  --target-port=4000 \
+  --type=ClusterIP \
+  --dry-run=client -o yaml > backend-service.yaml
+```
 #Raw ideas
 
 5.2 Creating Deployment & Service YAMLs
