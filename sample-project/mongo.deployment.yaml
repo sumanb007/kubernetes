@@ -1,33 +1,41 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: mongodb
+  name: web-mongodb
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: mongodb
+      app: web-mongodb
   template:
     metadata:
       labels:
-        app: mongodb
+        app: web-mongodb
     spec:
       containers:
-      - name: db-mongodb
+      - name: web-mongodb
         image: mongo:4.0-rc-xenial
         ports:
         - containerPort: 27017
+        volumeMounts:
+        - name: mongo-storage
+          mountPath: /data/db  # MongoDB stores its data here
+      volumes:
+      - name: mongo-storage
+        nfs:
+          server: 192.168.1.110
+          # Adjust this path as needed for environment.
+          path: /mnt/sdb2-partition/mongo-NFS-server
 ---
+# MONGODB Service (remains the same)
 apiVersion: v1
 kind: Service
 metadata:
   name: web-mongodb
 spec:
   selector:
-    app: mongodb
-  type: NodePort
+    app: web-mongodb
   ports:
-  - name: mongodb
-    port: 27017
+  - port: 27017
     targetPort: 27017
-    nodePort: 31017
+  type: ClusterIP  # Accessible only within the cluster
