@@ -22,6 +22,11 @@ Setup with 1 master nodes and 2 or more worker nodes. Each should have at least 
 - 20 GB free disk space on /var or more
 - Stable internet connection
 
+## Plan
+- Multinode cluster ( 2 workernode, 1 controlplane)
+- Custom Namespace (ex., dev)
+- Networking Model: Calico
+  
 ## Lab Setup
 - Masternode: 192.168.0.11   masternode.k8s.com
 - First Workernode: 192.168.0.12   workernode1.k8s.com
