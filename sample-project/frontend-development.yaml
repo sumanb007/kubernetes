@@ -1,34 +1,42 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: frontend-app-deployment
+  creationTimestamp: null
+  labels:
+    app: frontend
+  name: frontend
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: frontend-app
+      app: frontend
+  strategy: {}
   template:
     metadata:
+      creationTimestamp: null
       labels:
-        app: frontend-app
+        app: frontend
     spec:
       containers:
-      - name: frontend-app-container
-        image: bsumanji/frontend31010-private12
-        ports:
-        - containerPort: 3000
+      - image: 192.168.1.110:5050/frontend-crud-webapp:minimal
+        name: frontend-crud-webapp-container
+        resources: {}
+status: {}
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: frontend-app-service
+  creationTimestamp: null
+  labels:
+    app: frontend
+  name: frontend
 spec:
-  selector:
-    app: frontend-app
-  type: NodePort
   ports:
-  - name: http
-    port: 80
+  - port: 80
+    protocol: TCP
     targetPort: 3000
-    nodePort: 31000
-
+  selector:
+    app: frontend
+  type: ClusterIP 
+status:
+  loadBalancer: {}
