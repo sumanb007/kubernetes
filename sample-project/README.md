@@ -3,20 +3,69 @@
 Now let's continue further to orchestrate [Application](https://github.com/sumanb007/crud-webapplication/blob/main/README.md) containers using Kubernetes.
 
 As planned in project, let's first:
-1. Design Cluster. (as shown in this [link](https://github.com/sumanb007/kubernetes?tab=readme-ov-file#a-cluster-setup))
+1. Design Cluster. (as shown in this [link]([link](https://github.com/sumanb007/kubernetes/blob/master/README.md#a-cluster-setup))
 2. Ensure NFS is setup in every cluster host. (like [here](https://github.com/sumanb007/Labs/blob/main/NFS%20setup.md))
 3. Setup Cluster to Trust Private Registry with TLS. (like [here](https://github.com/sumanb007/kubernetes/blob/master/README.md#d-setting-up-cluster-to-trust-private-registry-with-tls))
 
 ### Table of Conents
-1. [Creating Deployment and Service YAMLs](#2-creating-deployment-and-service-yamls)
-2. [Setting Up Persistent Volumes with NFS](#3-setting-up-persistent-volumes-with-NFS)
-3. [Ingress and TLS](#4-ingress-and-tls)
-4. [Testing the Cluster](#5-testing-the-cluster)
-5. [Scaling and Resource Limits](#6-scaling-and-resource)  
+1. [Setting Up Persistent Volumes with NFS](#1-setting-up-persistent-volumes-with-NFS)
+2. [Creating Deployment and Service YAMLs](#2-creating-deployment-and-service-yamls)
+3. [Ingress and TLS](#3-ingress-and-tls)
+4. [Testing the Cluster](#4-testing-the-cluster)
+5. [Scaling and Resource Limits](#5-scaling-and-resource)  
 
 ---
+## 1. Setting Up Persistent Volumes with NFS
 
-## 1. Creating Deployment and Service YAMLs
+Though hardcoding nfs in pod is simple and easy to use, it has some limitations:
+   - No resusability
+   - Dynamic provisioning not supported
+   - No Centralized management
+   - Bypasses Kubernetes’ storage abstraction model.
+   - If the nfs server changes, all pod specs must be updated manually.
+
+### So, we are creating Persistent Volume. Let's continue.
+
+### Persistent Volume yaml
+```yaml
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: mongo-nfs-pv
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteMany
+  nfs:
+    server: 192.168.1.110
+    path: /mnt/sdb2-partition/mongo-NFS-server
+  persistentVolumeReclaimPolicy: Retain
+```
+
+### Persistent Volume Claim yaml
+```yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mongo-pvc
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 1Gi
+```
+
+Let's apply and verify them now.
+```bash
+kubectl create -f mongo-nfs-pv.yml
+kubectl create -f mongo-pvc.yml
+kubectl get pv
+kubectl get pvc
+```
+---
+## 2. Creating Deployment and Service YAMLs
 
 ### Plan:
    - Frontend exposed outside of cluster using ingress.
@@ -124,16 +173,60 @@ Expose the pod using ClusterIP service.
 ```bash
 kubectl expose deployment backend --name=backend --port=5000 --target-port=4000  --type=ClusterIP  --dry-run=client -o yaml > backend-service.yaml
 ```
+
+
+### Mongodb yaml
+
+For mongodb, we will configure it to use nfs volume as PVC. 
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-mongodb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: web-mongodb
+  template:
+    metadata:
+      labels:
+        app: web-mongodb
+    spec:
+      containers:
+      - name: web-mongodb
+        image: mongo:4.0-rc-xenial
+        ports:
+        - containerPort: 27017
+        volumeMounts:
+        - name: mongo-storage
+          mountPath: /data/db  # MongoDB stores its data here
+      volumes:
+      - name: mongo-storage
+        persistentVolumeClaim:
+          claimName: mongo-pvc
+---
+# MONGODB Service (remains the same)
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-mongodb
+spec:
+  selector:
+    app: web-mongodb
+  ports:
+  - port: 27017
+    targetPort: 27017
+  type: ClusterIP  # Accessible only within the cluster
+```
+---
+
+## 3. Ingress and TLS
+
 #Raw ideas
 
 
-5.3 Setting Up Persistent Volumes with NFS
 
-Static vs dynamic provisioning; highlight StorageClass.
-YAML for PersistentVolume (NFS server IP, path, reclaimPolicy).
-PersistentVolumeClaim with ReadWriteMany.
-Mount into pods: volumeMounts + subPath best practices.
-Security: fsGroup, runAsUser, NFS‑related SELinux considerations.
 5.4 Ingress and TLS
 
 Ingress controller choice: NGINX, Traefik, or cloud‑native.
