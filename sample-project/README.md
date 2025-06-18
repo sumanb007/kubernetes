@@ -23,7 +23,7 @@ Though hardcoding NFS in pod is simple and easy to use, it has some key limitati
    - Dynamic provisioning not supported
    - No Centralized management
    - Bypasses Kubernetes’ storage abstraction model.
-   - If the nfs server changes, all pod specs must be updated manually.
+   - If the NFS server changes, all pod specs must be updated manually.
 
 ### So, we are creating Persistent Volume. Let's continue..
 
@@ -103,9 +103,12 @@ spec:
     spec:
       containers:
       - image: 192.168.1.110:5050/frontend-crud-webapp:minimal
-        name: frontend-crud-webapp-container
+        name: frontend-crud-webapp
+        ports:
+        - containerPort: 8080
         resources: {}
 status: {}
+
 ```
 Apply the deployment and verify
 ```bash
@@ -118,7 +121,7 @@ kubectl get pods -l app=frontend
 
 Expose the pod using ClusterIP service.
 ```bash
-kubectl expose deployment frontend--port=80 --target-port=3000 --type=ClusterIP --dry-run=client -o yaml > frontend-service.yaml
+kubectl expose deployment frontend --port=80 --target-port=8080 --type=ClusterIP --dry-run=client -o yaml > frontend-service.yaml
 ```
 
 Verify service
@@ -131,7 +134,7 @@ kubectl describe svc frontend
 Similarly for backend, lets continue from imperative command and modify.
 
 ```bash
-kubectl create deployment backend--image=192.168.1.110:5050/backend-crud-webapp:minimal --dry-run=client -o yaml > backend-deployment.yaml
+kubectl create deployment backend --image=192.168.1.110:5050/backend-crud-webapp:minimal --dry-run=client -o yaml > backend-deployment.yaml
 ```
 ```yaml
 apiVersion: apps/v1
@@ -156,8 +159,11 @@ spec:
       containers:
       - image: 192.168.1.110:5050/backend-crud-webapp:minimal
         name: backend-crud-webapp
+        ports:
+        - containerPort: 4000
         resources: {}
 status: {}
+
 ```
 
 Apply the deployment and verify.
@@ -250,7 +256,7 @@ metadata:
   namespace: metallb-system
 spec:
   addresses:
-  - 192.168.0.240-192.168.0.250
+  - 192.168.1.240-192.168.1.250
 
 ---
 apiVersion: metallb.io/v1beta1
@@ -264,7 +270,7 @@ Apply it: `kubectl apply -f metallb-config.yml`
 
 ### 3.3. Install the nginx-ingress controller and apply ingress resource.
 
-We can use the manifest from the official project [https://metallb.io/installation/](https://metallb.io/installation/):
+We can use the manifest from the official project:
 ```bash
 kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.8.1/deploy/static/provider/cloud/deploy.yaml
 ```
@@ -285,7 +291,7 @@ kubectl get svc -n ingress-nginx
 It should get an external IP.
 
 ### Ingress resource
-Let's create the ingress resource now. 
+Let's create the ingress resource now, `ingress-resource.yml`:
 ```yaml
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -312,32 +318,82 @@ spec:
             port:
               number: 5000
 ```
+### Finally 
+Verify service endpoints
+`kubectl get endpoints`
+
+Verify MetalLB assignment. Look for Type: LoadBalancer and External-IP to be your network IP.
+```bash
+kubectl get svc -n ingress-nginx
+```
+
+Check Ingress Resource Status
+```bash
+kubectl get ingress
+```
+
+Verify Network Path
+Trace request through services:
+```kubectl describe ingress app-ingress```
+
+
+Test Direct LoadBalancer Access
+Bypass DNS to verify direct LoadBalancer IP access:
+```bash
+curl -H "Host: app.example.com" http://192.168.1.240
+curl -H "Host: app.example.com" http://192.168.1.240/students
+```
+Should return same responses as domain access
+
+
+Update DNS or /etc/hosts to point app.example.com to the external IP of the ingress-nginx service.
+```bash
+echo '192.168.1.240 app.example.com' | sudo tee -a /etc/hosts
+```
+
+Verify DNS resolution:
+```bash
+dig app.example.com +short
+# Should return: 192.168.1.240
+```
+
+Check Ingress Controller Logs
+```bash
+kubectl logs -n ingress-nginx \
+  -l app.kubernetes.io/component=controller \
+  --tail=50
+```
+
+Verify browsing application
+```bash
+curl -I http://app.example.com
+curl -v http://app.example.com
+curl http://app.example.com/students
+```
+
+Connect to MongoDB using the legacy mongo shell:
+```bash
+kubectl exec -it web-mongodb-76c57d566d-sh4lk -- mongo studentDB
+```
+
+You should see:
+```
+mongo
+MongoDB shell version v5.0.x
+connecting to: mongodb://127.0.0.1:27017/studentDB?compressors=disabled&gssapiServiceName=mongodb
+Implicit session: session { "id" : UUID(...) }
+MongoDB server version: 5.0.x
+```
+
+
+### Verify Data Persistence by deleting mongodb pods and then check in newly created pod
 
 5.5 Testing the Cluster
 
-Smoke tests: curl ingress URL, call API endpoints.
-kubectl port‑forward for local debugging.
-Log checks: kubectl logs -f per component.
-kubectl get events / describe` for troubleshooting.
-Readiness gates: make CI fail fast if pods not ready.
-Chaos testing: delete pod, cordon node, simulate NFS outage.
+
 5.6 Scaling and Resource Limits
 
-CPU/memory requests & limits rationale.
-Horizontal Pod Autoscaler (HPA) tied to CPU or custom metrics.
-Vertical Pod Autoscaler (VPA) for long‑running services.
-Cluster Autoscaler / node groups (if on cloud).
-PodDisruptionBudgets so rolling upgrades don’t drop traffic.
-Quota & LimitRange per namespace.
-Quick Grafana screenshot for visual proof.
+
 5.7 CI/CD Integration (Optional)
 
-Build pipeline: GitHub Actions → Docker build → push to registry.
-Lint & helm‑template stage to catch YAML errors.
-Deploy pipeline:
-kubectl apply,
-Helm upgrade, or
-Argo CD / Flux (GitOps).
-Automatic HPA tests in pipeline (k6 or locust).
-Promotion workflow: dev → staging → prod via tags.
-Secret management: OIDC‑based push to kubeseal/sops.
+
