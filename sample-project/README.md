@@ -291,7 +291,7 @@ kubectl get svc -n ingress-nginx
 It should get an external IP.
 
 ### Ingress resource
-Let's create the ingress resource now, `ingress-resource.yml`:
+Let's create the basic ingress resource now, `ingress-resource.yml`:
 ```yaml
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -318,7 +318,128 @@ spec:
             port:
               number: 5000
 ```
+
+### 3.4. Implementing TLS for Secure HTTPS Access
+
+For real-world scenario, let's replace self-signed certificate with below options:
+
+### Option 1: Permanent Solution for Kubernetes Nodes
+Install the CA certificate on all cluster nodes:
+
+```bash
+#On each node (masternode, workernode1, workernode2)
+sudo scp bsuman@masternode:~/kube-yaml/certs/ca.crt /usr/local/share/ca-certificates/app-ca.crt
+sudo update-ca-certificates
+```
+
+### Option 2: Using Self-Signed Certificate Setup for Private/Local Environment
+As we are deploying this in private environment lets use self-signed certificates.
+
+1. Installing cert-manager from link [here](https://cert-manager.io/docs/installation/))
+
+   ```bash
+   kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.18.0/cert-manager.yaml
+   ```
+2. Creating Self-Signed Issuer
+   ```bash
+   cat <<EOF | kubectl apply -f -
+   apiVersion: cert-manager.io/v1
+   kind: Issuer
+   metadata:
+     name: selfsigned-issuer
+     namespace: default
+   spec:
+     selfSigned: {}
+   EOF
+   ```
+   
+3. Creating Certificate Resources
+   ```bash
+   cat <<EOF | kubectl apply -f -
+   apiVersion: cert-manager.io/v1
+   kind: Certificate
+   metadata:
+     name: app-tls
+     namespace: default
+   spec:
+     secretName: app-tls-secret
+     duration: 8760h # 1 year
+     renewBefore: 720h # 30 days
+     issuerRef:
+       name: selfsigned-issuer
+       kind: Issuer
+     commonName: app.example.com
+     dnsNames:
+     - app.example.com
+     - "*.app.example.com"
+     ipAddresses:
+     - 192.168.1.240
+     - 127.0.0.1
+   EOF
+   ```
+   
+4. Let's update created Ingress to use cert-manager
+   `kubectl edit ingress app-ingress`
+   and add these annotations:
+   ```yaml
+   tls:
+   - hosts:
+     - app.example.com
+     secretName: app-tls-secret  # matching secretName in Certificate
+   ```
+   
+5. Now, verify:
+
+   - Check certificate status: 
+     ```bash
+     kubectl get certificate -w
+     ```
+   
+   - Describe certificate (watch for events): 
+     ```bash
+     kubectl describe certificate app-tls
+     ```
+     
+   - Check secret: 
+     ```bash
+     kubectl describe secret app-tls-secret
+     ```
+   
+   - Test HTTPS access: 
+     ```bash
+     curl -k https://app.example.com  # Works immediately
+     ```
+
+6. Full Trust Setup
+   - Extract CA Certificate: 
+     ```bash
+     kubectl get secret app-tls-secret -o jsonpath='{.data.ca\.crt}' | base64 -d > ca.crt
+     ```
+
+   - Install CA on Local Machine: 
+     ```bash
+     sudo cp ca.crt /usr/local/share/ca-certificates/app-ca.crt
+     sudo update-ca-certificates
+     ```
+     
+7. Now let's verify TLS
+   - Check cert-manager logs: 
+     ```bash
+     kubectl logs -n cert-manager -l app.kubernetes.io/instance=cert-manager
+     ```
+
+   - Force certificate renewal: 
+     ```bash
+     kubectl annotate certificate app-tls cert-manager.io/force-renewal="true"
+     ```
+
+   - Verify certificate chain: 
+     ```bash
+     kubectl get secret app-tls-secret -o jsonpath='{.data.tls\.crt}' | base64 -d | openssl x509 -text -noout
+     ```
+     
 ### Finally 
+
 Verify service endpoints
 `kubectl get endpoints`
 
