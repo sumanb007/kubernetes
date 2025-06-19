@@ -333,14 +333,29 @@ sudo update-ca-certificates
 ```
 
 ### Option 2: Using Self-Signed Certificate Setup for Private/Local Environment
-As we are deploying this in private environment lets use self-signed certificates.
+As we are deploying this in private environment this is recommended as best solution to use self-signed certificates.
+
+Then later `curl` with '-k' option as encryption does not allow anyother host to access the application.
+   Or we can copy the ca-certs to all hosts, that way is the trusted one and application can be accessed.
 
 1. Installing cert-manager from link [here](https://cert-manager.io/docs/installation/))
 
    ```bash
    kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.18.0/cert-manager.yaml
    ```
-2. Creating Self-Signed Issuer
+
+   Wait until cert-manager pods to become fully operational
+   ```bash
+   kubectl get pods -n cert-manager
+   ```
+
+   Verify webhook service
+   ```bash
+   kubectl get svc -n cert-manager
+   kubectl describe svc cert-manager-webhook -n cert-manager
+   ```
+   
+3. Creating Self-Signed Issuer
    ```bash
    cat <<EOF | kubectl apply -f -
    apiVersion: cert-manager.io/v1
@@ -352,8 +367,15 @@ As we are deploying this in private environment lets use self-signed certificate
      selfSigned: {}
    EOF
    ```
-   
-3. Creating Certificate Resources
+
+   Verify it
+   ```bash
+   kubectl get issuer selfsigned-issuer -n default
+   kubectl describe issuer selfsigned-issuer -n default
+   ```
+
+
+4. Creating Certificate Resources
    ```bash
    cat <<EOF | kubectl apply -f -
    apiVersion: cert-manager.io/v1
@@ -378,7 +400,7 @@ As we are deploying this in private environment lets use self-signed certificate
    EOF
    ```
    
-4. Let's update created Ingress to use cert-manager
+5. Let's update created Ingress to use cert-manager
    `kubectl edit ingress app-ingress`
    and add these annotations:
    ```yaml
@@ -388,7 +410,7 @@ As we are deploying this in private environment lets use self-signed certificate
      secretName: app-tls-secret  # matching secretName in Certificate
    ```
    
-5. Now, verify:
+6. Now, verify:
 
    - Check certificate status: 
      ```bash
@@ -410,7 +432,7 @@ As we are deploying this in private environment lets use self-signed certificate
      curl -k https://app.example.com  # Works immediately
      ```
 
-6. Full Trust Setup
+7. Full Trust Setup
    - Extract CA Certificate: 
      ```bash
      kubectl get secret app-tls-secret -o jsonpath='{.data.ca\.crt}' | base64 -d > ca.crt
@@ -422,7 +444,7 @@ As we are deploying this in private environment lets use self-signed certificate
      sudo update-ca-certificates
      ```
      
-7. Now let's verify TLS
+8. Now let's verify TLS
    - Check cert-manager logs: 
      ```bash
      kubectl logs -n cert-manager -l app.kubernetes.io/instance=cert-manager
