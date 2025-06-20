@@ -466,78 +466,76 @@ Then later `curl` with '-k' option as encryption does not allow anyother host to
      ```bash
      kubectl get secret app-tls-secret -o jsonpath='{.data.tls\.crt}' | base64 -d | openssl x509 -text -noout
      ```
-     
+---     
 ## 4. Testing the Cluster 
 
-Verify service endpoints
-`kubectl get endpoints`
+- Verify service endpoints
+  `kubectl get endpoints`
 
-Verify MetalLB assignment. Look for Type: LoadBalancer and External-IP to be your network IP.
-```bash
-kubectl get svc -n ingress-nginx
-```
+- Verify MetalLB assignment. Look for Type: LoadBalancer and External-IP to be your network IP.
+  ```bash
+  kubectl get svc -n ingress-nginx
+  ```
 
-Check Ingress Resource Status
-```bash
-kubectl get ingress
-```
+- Check Ingress Resource Status
+  ```bash
+  kubectl get ingress
+  ```
 
-Verify Network Path
-Trace request through services:
-```kubectl describe ingress app-ingress```
-
-
-Test Direct LoadBalancer Access
-Bypass DNS to verify direct LoadBalancer IP access:
-```bash
-curl -H "Host: app.example.com" http://192.168.1.240
-curl -H "Host: app.example.com" http://192.168.1.240/students
-```
-Should return same responses as domain access
+- Verify Network Path
+  Trace request through services:
+  ```kubectl describe ingress app-ingress```
 
 
-Update DNS or /etc/hosts to point app.example.com to the external IP of the ingress-nginx service.
-```bash
-echo '192.168.1.240 app.example.com' | sudo tee -a /etc/hosts
-```
+  Test Direct LoadBalancer Access
+  Bypass DNS to verify direct LoadBalancer IP access:
+  ```bash
+  curl -H "Host: app.example.com" http://192.168.1.240
+  curl -H "Host: app.example.com" http://192.168.1.240/students
+  ```
+  Should return same responses as domain access
 
-Verify DNS resolution:
-```bash
-dig app.example.com +short
-# Should return: 192.168.1.240
-```
 
-Check Ingress Controller Logs
-```bash
-kubectl logs -n ingress-nginx \
+  Update DNS or /etc/hosts to point app.example.com to the external IP of the ingress-nginx service.
+  ```bash
+  echo '192.168.1.240 app.example.com' | sudo tee -a /etc/hosts
+  ```
+
+  Verify DNS resolution:
+  ```bash
+  dig app.example.com +short
+  # Should return: 192.168.1.240
+  ```
+
+  Check Ingress Controller Logs
+  ```bash
+  kubectl logs -n ingress-nginx \
   -l app.kubernetes.io/component=controller \
   --tail=50
-```
+  ```
 
-Verify browsing application
-```bash
-curl -I http://app.example.com
-curl -v http://app.example.com
-curl http://app.example.com/students
-```
+  Verify browsing application
+  ```bash
+  curl -I http://app.example.com
+  curl -v http://app.example.com
+  curl http://app.example.com/students
+  ```
 
-Connect to MongoDB using the legacy mongo shell:
-```bash
-kubectl exec -it web-mongodb-76c57d566d-sh4lk -- mongo studentDB
-```
+  Connect to MongoDB using the legacy mongo shell:
+  ```bash
+  kubectl exec -it web-mongodb-76c57d566d-sh4lk -- mongo studentDB
+  ```
 
-You should see:
-```
-mongo
-MongoDB shell version v5.0.x
-connecting to: mongodb://127.0.0.1:27017/studentDB?compressors=disabled&gssapiServiceName=mongodb
-Implicit session: session { "id" : UUID(...) }
-MongoDB server version: 5.0.x
-```
-
-
-### Verify Data Persistence by deleting mongodb pods and then check in newly created pod
-
+  You should see:
+  ```
+  mongo
+  MongoDB shell version v5.0.x
+  connecting to: mongodb://127.0.0.1:27017/studentDB?compressors=disabled&gssapiServiceName=mongodb
+  Implicit session: session { "id" : UUID(...) }
+  MongoDB server version: 5.0.x
+  ```
+  ### Verify Data Persistence by deleting mongodb pods and then check in newly created pod
+---
 ## 5. Scaling and Resource Limits
 
 
