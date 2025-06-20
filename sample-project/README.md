@@ -9,11 +9,16 @@ As planned in project, let's first:
 3. Setup Cluster to Trust Private Registry with TLS. (like [here](https://github.com/sumanb007/kubernetes/blob/master/README.md#d-setting-up-cluster-to-trust-private-registry-with-tls))
 
 ### Table of Conents
-1. [Setting Up Persistent Volumes with NFS](#1-setting-up-persistent-volumes-with-nfs)
-2. [Creating Deployment and Service YAMLs](#2-creating-deployment-and-service-yamls)
-3. [Ingress and TLS](#3-ingress-and-tls)
-4. [Testing the Cluster](#4-testing-the-cluster)
-5. [Scaling and Resource Limits](#5-scaling-and-resource)  
+
+1. [Setting Up Persistent Volumes with NFS](#1-setting-up-persistent-volumes-with-nfs)  
+2. [Creating Deployment and Service YAMLs](#2-creating-deployment-and-service-yamls)  
+3. [Ingress and TLS Setup](#3-ingress-and-tls-setup)  
+    3.1. [MetalLB Setup](#31-metallb-setup)  
+    3.2. [Nginx-ingress controller and Ingress resource](#32-nginx-ingress-controller-and-ingress-resource)  
+    3.3. [TLS for Secure HTTPS Access](#33-tls-for-secure-https-access)  
+4. [Testing the Cluster](#4-testing-the-cluster)  
+5. [Scaling and Resource Limits](#5-scaling-and-resource-limits)
+
 
 ---
 ## 1. Setting Up Persistent Volumes with NFS
@@ -226,7 +231,7 @@ spec:
 ```
 ---
 
-## 3. Ingress and TLS
+## 3. Ingress and TLS Setup
 
 We will expose both frontend and backend pods over a single domain (app.example.com) using Kubernetes Ingress and NGINX Ingress Controller, enabling clean URLs and HTTPS support.
 
@@ -234,7 +239,7 @@ We will expose both frontend and backend pods over a single domain (app.example.
 
 We will to deploy an Ingress controller (nginx-ingress) and then expose it via a LoadBalancer service so that MetalLB assigns an IP to it.
 
-### 3.1. Install MetalLB
+### 3.1. MetalLB Setup
 
 We can use the manifest from the official project [https://metallb.io/installation/](https://metallb.io/installation/):
 ```bash
@@ -243,7 +248,9 @@ kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.15.2/confi
 
 Wait for the pods to be ready.
 
-### 3.2. Configure the IP address pool for MetalLB
+### Configure the IP address pool for MetalLB
+Kubernetes on-premises setups or on unsupported cloud providers can’t assign an external IP automatically for LoadBalancer services.
+As we running Kubernetes on a bare-metal setup and it won’t automatically assign an external IP so we install MetalLB.
 
 We need to provide a range of IP addresses that are available in the local network and not in use by DHCP. That is, 192.168.1.200-192.168.1.220.
 
@@ -268,7 +275,7 @@ metadata:
 
 Apply it: `kubectl apply -f metallb-config.yml`
 
-### 3.3. Install the nginx-ingress controller and apply ingress resource.
+### 3.2. Nginx-ingress controller and Ingress resource.
 
 We can use the manifest from the official project:
 ```bash
@@ -319,7 +326,7 @@ spec:
               number: 5000
 ```
 
-### 3.4. Implementing TLS for Secure HTTPS Access
+### 3.3. TLS for Secure HTTPS Access
 
 For real-world scenario, let's replace self-signed certificate with below options:
 
@@ -460,7 +467,7 @@ Then later `curl` with '-k' option as encryption does not allow anyother host to
      kubectl get secret app-tls-secret -o jsonpath='{.data.tls\.crt}' | base64 -d | openssl x509 -text -noout
      ```
      
-### Finally 
+## 5. Testing the Cluster 
 
 Verify service endpoints
 `kubectl get endpoints`
@@ -531,12 +538,9 @@ MongoDB server version: 5.0.x
 
 ### Verify Data Persistence by deleting mongodb pods and then check in newly created pod
 
-5.5 Testing the Cluster
+## 4. Testing the Cluster
+## 5. Scaling and Resource Limits
 
 
-5.6 Scaling and Resource Limits
-
-
-5.7 CI/CD Integration (Optional)
 
 
