@@ -467,7 +467,7 @@ Then later `curl` with '-k' option as encryption does not allow anyother host to
      kubectl get secret app-tls-secret -o jsonpath='{.data.tls\.crt}' | base64 -d | openssl x509 -text -noout
      ```
      
-## 5. Testing the Cluster 
+## 4. Testing the Cluster 
 
 Verify service endpoints
 `kubectl get endpoints`
@@ -538,7 +538,6 @@ MongoDB server version: 5.0.x
 
 ### Verify Data Persistence by deleting mongodb pods and then check in newly created pod
 
-## 4. Testing the Cluster
 ## 5. Scaling and Resource Limits
 
 
