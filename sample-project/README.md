@@ -553,9 +553,20 @@ Then later `curl` with '-k' option as encryption does not allow anyother host to
   ```
 ---
 ## 5. Scaling and Resource Limits
-Lets ensures high availability—if one pod fails, another continues serving traffic.
-Then manage resource requests and limits to prevent any one pod from consuming excessive resources and impacting neighbors.
-Finally ensure the service only receives traffic when the app is fully initialized and setup to restart the pod if it becomes unresponsive, improving resilience.
+- Lets ensures high availability—if one pod fails, another continues serving traffic. `replicas:2`
+- Then manage resource requests and limits to prevent any one pod from consuming excessive resources and impacting neighbors.
+- Finally ensure the service only receives traffic when the app is fully initialized and setup to restart the pod if it becomes unresponsive, improving resilience.
+
+### 5.1. Resources Limits
+First let's find out how much of the minimun resources is used when just a pod is up. For that let's deploy metrics.
+- The most reliable and up-to-date method for component is:
+  ```bash
+  ```
+  
+- If high-availability is needed in production, there's also a dedicated manifest:
+  ```bash
+  ```
+  
 
 
 
