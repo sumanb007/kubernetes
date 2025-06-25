@@ -487,7 +487,7 @@ Then later `curl` with '-k' option as encryption does not allow anyother host to
   ```kubectl describe ingress app-ingress```
 
 
-  Test Direct LoadBalancer Access
+- Test Direct LoadBalancer Access
   Bypass DNS to verify direct LoadBalancer IP access:
   ```bash
   curl -H "Host: app.example.com" http://192.168.1.240
@@ -496,37 +496,37 @@ Then later `curl` with '-k' option as encryption does not allow anyother host to
   Should return same responses as domain access
 
 
-  Update DNS or /etc/hosts to point app.example.com to the external IP of the ingress-nginx service.
+- Update DNS or /etc/hosts to point app.example.com to the external IP of the ingress-nginx service.
   ```bash
   echo '192.168.1.240 app.example.com' | sudo tee -a /etc/hosts
   ```
 
-  Verify DNS resolution:
+- Verify DNS resolution:
   ```bash
   dig app.example.com +short
   # Should return: 192.168.1.240
   ```
 
-  Check Ingress Controller Logs
+- Check Ingress Controller Logs
   ```bash
   kubectl logs -n ingress-nginx \
   -l app.kubernetes.io/component=controller \
   --tail=50
   ```
 
-  Verify browsing application
+- Verify browsing application
   ```bash
   curl -I http://app.example.com
   curl -v http://app.example.com
   curl http://app.example.com/students
   ```
 
-  Connect to MongoDB using the legacy mongo shell:
+- Connect to MongoDB using the legacy mongo shell:
   ```bash
   kubectl exec -it web-mongodb-76c57d566d-sh4lk -- mongo studentDB
   ```
 
-  You should see:
+- You should see:
   ```
   mongo
   MongoDB shell version v5.0.x
@@ -534,9 +534,28 @@ Then later `curl` with '-k' option as encryption does not allow anyother host to
   Implicit session: session { "id" : UUID(...) }
   MongoDB server version: 5.0.x
   ```
-  ### Verify Data Persistence by deleting mongodb pods and then check in newly created pod
+
+  ### Testing Data Persistency in mongodb pods
+  First lets simplify the process my using environment variable.
+  ```bash
+  MONGODB_POD=$(kubectl get pod -l app=web-mongodb -o jsonpath='{.items[0].metadata.name}')
+  ```
+  Now let's delete pod and verify the data persistence.
+  ```bash
+  curl https://app.example.com/students #should show data entry
+  kubectl delete pod $MONGODB_POD
+  MONGODB_POD=$(kubectl get pod -l app=web-mongodb -o jsonpath='{.items[0].metadata.name}')
+  ```
+  verify if Pod is UP and recheck data by curl
+  ```bash
+  kubectl get pod $MONGODB_POD
+  curl https://app.example.com/students
+  ```
 ---
 ## 5. Scaling and Resource Limits
+Lets ensures high availability—if one pod fails, another continues serving traffic.
+Then manage resource requests and limits to prevent any one pod from consuming excessive resources and impacting neighbors.
+Finally ensure the service only receives traffic when the app is fully initialized and setup to restart the pod if it becomes unresponsive, improving resilience.
 
 
 
