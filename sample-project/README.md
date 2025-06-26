@@ -1,3 +1,5 @@
+
+
 # Orchestrating Containerized Application
 
 Now let's continue further to orchestrate [Application](https://github.com/sumanb007/crud-webapplication/blob/main/README.md) containers using Kubernetes.
@@ -13,11 +15,20 @@ As planned in project, let's first:
 1. [Setting Up Persistent Volumes with NFS](#1-setting-up-persistent-volumes-with-nfs)  
 2. [Creating Deployment and Service YAMLs](#2-creating-deployment-and-service-yamls)  
 3. [Ingress and TLS Setup](#3-ingress-and-tls-setup)  
-    3.1. [MetalLB Setup](#31-metallb-setup)  
-    3.2. [Nginx-ingress controller and Ingress resource](#32-nginx-ingress-controller-and-ingress-resource)  
-    3.3. [TLS for Secure HTTPS Access](#33-tls-for-secure-https-access)  
+   3.1. [MetalLB Setup](#31-metallb-setup)  
+   3.2. [Nginx-ingress controller and Ingress resource](#32-nginx-ingress-controller-and-ingress-resource)  
+   3.3. [TLS for Secure HTTPS Access](#33-tls-for-secure-https-access)  
 4. [Testing the Cluster](#4-testing-the-cluster)  
-5. [Scaling and Resource Limits](#5-scaling-and-resource-limits)
+5. [Scaling and Resource Limits](#5-scaling-and-resource-limits)  
+   5.1. [Resources Limits](#51-resources-limits)  
+   5.2. [Implementing Horizontal Pod Autoscaler (HPA)](#52-implementing-horizontal-pod-autoscaler-hpa)  
+6. [Pod Security and Network Policy](#6-pod-security-and-network-policy)
+
+
+
+7. Actual Orchestration
+
+
 
 
 ---
@@ -95,7 +106,7 @@ metadata:
     app: frontend
   name: frontend
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: frontend
@@ -150,7 +161,7 @@ metadata:
     app: backend
   name: backend
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: backend
@@ -553,21 +564,148 @@ Then later `curl` with '-k' option as encryption does not allow anyother host to
   ```
 ---
 ## 5. Scaling and Resource Limits
-- Lets ensures high availability—if one pod fails, another continues serving traffic. `replicas:2`
-- Then manage resource requests and limits to prevent any one pod from consuming excessive resources and impacting neighbors.
-- Finally ensure the service only receives traffic when the app is fully initialized and setup to restart the pod if it becomes unresponsive, improving resilience.
+To ensure reliable performance under varying load conditions, lets implement:
+- High availability, if one pod fails, another continues serving traffic. `replicas:2`
+- Manage resource requests and limits to prevent any one pod from consuming excessive resources and impacting neighbors.
+- Ensure the service only receives traffic when the app is fully initialized and setup to restart the pod if it becomes unresponsive, improving resilience.
 
 ### 5.1. Resources Limits
-First let's find out how much of the minimun resources is used when just a pod is up. For that let's deploy metrics.
-- The most reliable and up-to-date method for component is:
-  ```bash
-  ```
-  
-- If high-availability is needed in production, there's also a dedicated manifest:
-  ```bash
-  ```
-  
 
+Before proceeding, let's deploy metrics then we find out how much of the minimun resources is used when just a pod is up.
+
+1. The most reliable and up-to-date method for component is:
+  ```bash
+  kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+  ```
+  Let's patch with this below
+    ```bash
+    kubectl patch deployment metrics-server -n kube-system --type='json' -p='[
+    {
+    "op": "add",
+    "path": "/spec/template/spec/hostNetwork",
+    "value": true
+    },
+    {
+    "op": "replace",
+    "path": "/spec/template/spec/containers/0/args",
+    "value": [
+    "--cert-dir=/tmp",
+    "--secure-port=4443",
+    "--kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname",
+    "--kubelet-use-node-status-port",
+    "--metric-resolution=15s",
+    "--kubelet-insecure-tls"
+    ]
+    },
+    {
+    "op": "replace",
+    "path": "/spec/template/spec/containers/0/ports/0/containerPort",
+    "value": 4443
+    }
+    ]'
+    ```
+      If high-availability is needed in production, there's also a dedicated manifest:
+      ```bash
+      kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/high-availability.yaml
+      ```
+
+2. Let's add resources limits to frontend, backend and mongo pods as below.
+    ```yaml
+    resources:
+      requests
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        cpu: "500m"
+        memory: "256Mi"
+    ```
+    
+    This configuration ensures:
+    - The pod always gets at least 100m CPU and 128Mi memory (requests).
+    - It can burst up to 500m CPU and 256Mi memory if available (limits).
+    - Helps Kubernetes schedule effectively and avoid pod eviction during high load.
+   
+   And for web-mongodb pod as below.   
+    ```yaml
+    resources:
+      requests:
+        cpu: "200m"
+        memory: "512Mi"
+      limits:
+        cpu: "1"
+        memory: "1Gi"
+    ```
+    
+3. Now apply, restart and verify the deployments
+   ```bash
+   kubectl apply -f mongodb-deploy.yml
+   kubectl rollout restart deploy/web-mongodb
+   kubectl get pod web-mongodb-76c57d566d-mtp6l -o yaml | grep -A6 "resources:"
+   ```
+
+### 5.2. Implementing Horizontal Pod Autoscaler (HPA)
+
+- Let's use HPA for scaling efficiency. We will scale frontend and backned pods when the usage is 70% of the requested resources.
+  ``
+> [!IMPORTANT]
+> For mongo pod, being a stateful, it's generally not appropriate to scale MongoDB with HPA in this context.
+> Instead we have used durable PVC (as already did via NFS). Added resource limits/requests to MongoDB pod to prevent it from exhausting node resources.
+
+So let's continue with stateless frontend and backend:
+
+```bash
+kubectl autoscale deployment frontend cpu-percent=70 min=2 max=10
+kubectl autoscale deployment backend --cpu-percent=70 --min=2 --max=10
+```
+
+### Or equivalent manifest for HPA we have :
+```yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: frontend-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: frontend
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 50
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: backend-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: backend
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 50
+```
+
+Let's verify now 
+
+```bash
+kubectl get hpa
+```
+
+## 6. Pod Security and Network Policy
 
 
 
