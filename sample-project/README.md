@@ -12,20 +12,17 @@ As planned in project, let's first:
 
 ### Table of Conents
 
-1. [Setting Up Persistent Volumes with NFS](#1-setting-up-persistent-volumes-with-nfs)  
-2. [Creating Deployment and Service YAMLs](#2-creating-deployment-and-service-yamls)  
-3. [Ingress and TLS Setup](#3-ingress-and-tls-setup)  
-   3.1. [MetalLB Setup](#31-metallb-setup)  
-   3.2. [Nginx-ingress controller and Ingress resource](#32-nginx-ingress-controller-and-ingress-resource)  
-   3.3. [TLS for Secure HTTPS Access](#33-tls-for-secure-https-access)  
-4. [Testing the Cluster](#4-testing-the-cluster)  
+1. [Setting Up Persistent Volumes with NFS](#1-setting-up-persistent-volumes-with-nfs)
+2. [Creating Deployment and Service YAMLs](#2-creating-deployment-and-service-yamls)
+3. [Ingress and TLS Setup](#3-ingress-and-tls-setup)
+      3.1. [MetalLB Setup](#31-metallb-setup)
+      3.2. [Nginx-ingress controller and Ingress resource](#32-nginx-ingress-controller-and-ingress-resource)
+      3.3. [TLS for Secure HTTPS Access](#33-tls-for-secure-https-access)
+4. [Testing the Cluster](#4-testing-the-cluster)
 5. [Scaling and Resource Limits](#5-scaling-and-resource-limits)  
-   5.1. [Resources Limits](#51-resources-limits)  
-   5.2. [Implementing Horizontal Pod Autoscaler (HPA)](#52-implementing-horizontal-pod-autoscaler-hpa)  
+      5.1. [Resources Limits](#51-resources-limits)  
+      5.2. [Implementing Horizontal Pod Autoscaler (HPA)](#52-implementing-horizontal-pod-autoscaler-hpa)
 6. [Pod Security and Network Policy](#6-pod-security-and-network-policy)
-
-
-
 7. Actual Orchestration
 
 
@@ -578,36 +575,36 @@ Before proceeding, let's deploy metrics then we find out how much of the minimun
   kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
   ```
   Let's patch with this below
-    ```bash
-    kubectl patch deployment metrics-server -n kube-system --type='json' -p='[
-    {
-    "op": "add",
-    "path": "/spec/template/spec/hostNetwork",
-    "value": true
-    },
-    {
-    "op": "replace",
-    "path": "/spec/template/spec/containers/0/args",
-    "value": [
-    "--cert-dir=/tmp",
-    "--secure-port=4443",
-    "--kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname",
-    "--kubelet-use-node-status-port",
-    "--metric-resolution=15s",
-    "--kubelet-insecure-tls"
-    ]
-    },
-    {
-    "op": "replace",
-    "path": "/spec/template/spec/containers/0/ports/0/containerPort",
-    "value": 4443
-    }
-    ]'
-    ```
-      If high-availability is needed in production, there's also a dedicated manifest:
-      ```bash
-      kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/high-availability.yaml
-      ```
+   ```bash
+   kubectl patch deployment metrics-server -n kube-system --type='json' -p='[
+   {
+   "op": "add",
+   "path": "/spec/template/spec/hostNetwork",
+   "value": true
+   },
+   {
+   "op": "replace",
+   "path": "/spec/template/spec/containers/0/args",
+   "value": [
+   "--cert-dir=/tmp",
+   "--secure-port=4443",
+   "--kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname",
+   "--kubelet-use-node-status-port",
+   "--metric-resolution=15s",
+   "--kubelet-insecure-tls"
+   ]
+   },
+   {
+   "op": "replace",
+   "path": "/spec/template/spec/containers/0/ports/0/containerPort",
+   "value": 4443
+   }
+   ]'
+   ```
+   If high-availability is needed in production, there's also a dedicated manifest:
+   ```bash
+   kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/high-availability.yaml
+   ```
 
 2. Let's add resources limits to frontend, backend and mongo pods as below.
     ```yaml
@@ -646,9 +643,9 @@ Before proceeding, let's deploy metrics then we find out how much of the minimun
 ### 5.2. Implementing Horizontal Pod Autoscaler (HPA)
 
 - Let's use HPA for scaling efficiency. We will scale frontend and backned pods when the usage is 70% of the requested resources.
-  ``
+  
 > [!IMPORTANT]
-> For mongo pod, being a stateful, it's generally not appropriate to scale MongoDB with HPA in this context.
+> For mongo pod, being a stateful, it's generally not appropriate to scale MongoDB with HPA in this context. Because HPA is designed for stateless.
 > Instead we have used durable PVC (as already did via NFS). Added resource limits/requests to MongoDB pod to prevent it from exhausting node resources.
 
 So let's continue with stateless frontend and backend:
@@ -704,7 +701,7 @@ Let's verify now
 ```bash
 kubectl get hpa
 ```
-
+---
 ## 6. Pod Security and Network Policy
 
 
