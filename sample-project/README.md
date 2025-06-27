@@ -23,7 +23,9 @@ As planned in project, let's first:
       5.1. [Resources Limits](#51-resources-limits)  
       5.2. [Implementing Horizontal Pod Autoscaler (HPA)](#52-implementing-horizontal-pod-autoscaler-hpa)
 6. [Pod Security and Network Policy](#6-pod-security-and-network-policy)
-7. Actual Orchestration
+      6.1. [Using securityContext](#61-using-securitycontext)
+      6.2. [Using Network Policy](#62-using-network-policy)
+8. Actual Orchestration
 
 
 
@@ -645,8 +647,8 @@ Before proceeding, let's deploy metrics then we find out how much of the minimun
 - Let's use HPA for scaling efficiency. We will scale frontend and backned pods when the usage is 70% of the requested resources.
   
 > [!IMPORTANT]
-> For mongo pod, being a stateful, it's generally not appropriate to scale MongoDB with HPA in this context. Because HPA is designed for stateless.
-> Instead we have used durable PVC (as already did via NFS). Added resource limits/requests to MongoDB pod to prevent it from exhausting node resources.
+> - For mongo pod, being a stateful, it's generally not appropriate to scale MongoDB with HPA in this context. Because HPA is designed for stateless.
+> - Instead we have used durable PVC (as already did via NFS). Added resource limits/requests to MongoDB pod to prevent it from exhausting node resources.
 
 So let's continue with stateless frontend and backend:
 
@@ -704,5 +706,151 @@ kubectl get hpa
 ---
 ## 6. Pod Security and Network Policy
 
+Here, we will enforce below for Security:
+- Enforce non-root execution using `runAsNonRoot`, `runAsUser`
+- Prevent file system tampering using `readOnlyRootFilesystem`
+- Remove Linux privileges using `drop capabilities`
+- Limit syscalls using `seccompProfile`
+- Limit pod communication using `Network Policy`
+
+### 6.1. Using securityContext
+
+We first structure into two levels:
+- Pod-level: Identity and volume permissions (same across containers)
+- Container-level: Process-level privileges and filesystem access
+
+In both frontend and backend, Pod-level securityContext (applies to spec.securityContext):
+```yaml
+spec:
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    seccompProfile:
+      type: RuntimeDefault
+```
+For mongo pod, all files and directories in NFS server are owned by UID 999 and GID 999.
+```yaml
+spec:
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 999
+    runAsGroup: 999
+    fsGroup: 999
+    seccompProfile:
+      type: RuntimeDefault
+```
+
+At Container-level in all frontend, backend and mongo pods, securityContext inside each container(spec.containers.securityContext):
+```yaml
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop:
+          - ALL
+```
 
 
+
+What these do ?
+- runAsNonRoot: true → prevents running as root
+- allowPrivilegeEscalation: false → blocks sudo-like privilege escalation
+- capabilities.drop → removes Linux capabilities like NET_ADMIN, SYS_ADMIN, etc.
+- seccompProfile → filters syscalls to reduce kernel attack surface
+
+### Now lets apply changes verify securityContext
+```bash
+kubectl apply -f frontend-deploy.yml
+kubectl apply -f backend-deploy.yml
+kubectl apply -f mongodb-deploy.yml
+```
+# screenshots (logs of failed pods)
+### Findings:
+
+Being `readOnlyRootFilesystem: true`, the common theme is that all these containers are trying to write to their filesystems but are blocked.
+- In frontend pod, the nginx container is failing because it tries to write to `/var/cache/nginx/client_temp` but the root filesystem is read-only.
+- In backend pod, the node.js application is failing because npm tries to create a directory `/home/node/.npm` but the filesystem is read-only.
+- MongoDB fails because it cannot unlink the socket file `/tmp/mongodb-27017.sock` due to read-only file system.
+
+We have a few options:
+ - Option 1: Disable `readOnlyRootFilesystem` for the containers that need to write to the root filesystem.
+    - This is less secure but might be necessary for applications that are not designed to run with a read-only root filesystem.
+     
+ - Option 2: For each container, identify the directories that need to be writable and mount emptyDir volumes or write to the mounted volumes (like the one we have for MongoDB at `/data/db`).
+
+Let's address each service:
+ - Frontend (nginx): 
+   The nginx image typically writes to `/var/cache/nginx` and `/var/run` (for pid file). We can try to make these directories writable by mounting emptyDir volumes or by disabling the read-only mode for the root filesystem.
+
+   ```yaml
+   # frontend-deploy.yml
+   spec:
+   template:
+    spec:
+      containers:
+      - name: frontend-crud-webapp
+        securityContext:
+          readOnlyRootFilesystem: true  # Keeping security enabled
+        volumeMounts:
+        - name: nginx-cache
+          mountPath: /var/cache/nginx
+      volumes:
+      - name: nginx-cache
+        emptyDir: {}
+   ```
+   
+ - Backend (node.js):
+   The npm cache and node_modules might require writing to the home directory. We can either disable the read-only root filesystem or change the npm cache directory to a location that is mounted as a volume (like an emptyDir).
+   
+   Here,
+   Either:
+      Disable the npm cache with npm start -- --cache /tmp
+      OR
+      Mount a writeable volume for npm cache:
+
+   ```yaml
+   # backend-deploy.yml
+      spec:
+        template:
+          spec:
+            containers:
+            - name: backend-crud-webapp
+              securityContext:
+                readOnlyRootFilesystem: true
+              command: ["sh", "-c"]
+              args: ["npm start -- --cache /tmp"]  # Disabling npm cache
+              # OR use a volume:
+              # volumeMounts:
+              # - name: npm-cache
+              #   mountPath: /home/node/.npm
+            # volumes:
+            # - name: npm-cache
+            #   emptyDir: {}
+   ```
+   
+ - MongoDB:
+   We already have a volume at `/data/db`, but MongoDB also uses `/tmp`. We can try to mount an emptyDir volume at `/tmp` to allow writing.
+
+   ```yaml
+   # mongodb-deploy.yml
+      spec:
+        template:
+          spec:
+            containers:
+            - name: web-mongodb
+              volumeMounts:
+              - name: mongo-storage
+                mountPath: /data/db
+              - name: tmp-volume
+                mountPath: /tmp  # Adding this mount
+            volumes:
+            - name: mongo-storage
+              persistentVolumeClaim:
+                claimName: mongo-pvc
+            - name: tmp-volume
+              emptyDir: {}  # Adding this volume
+   ```
+
+   
+
+### 6.2. Using Network Policy
