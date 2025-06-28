@@ -14,18 +14,18 @@ As planned in project, let's first:
 
 1. [Setting Up Persistent Volumes with NFS](#1-setting-up-persistent-volumes-with-nfs)
 2. [Creating Deployment and Service YAMLs](#2-creating-deployment-and-service-yamls)
-3. [Ingress and TLS Setup](#3-ingress-and-tls-setup)
-      3.1. [MetalLB Setup](#31-metallb-setup)
-      3.2. [Nginx-ingress controller and Ingress resource](#32-nginx-ingress-controller-and-ingress-resource)
-      3.3. [TLS for Secure HTTPS Access](#33-tls-for-secure-https-access)
+3. [Ingress and TLS Setup](#3-ingress-and-tls-setup)  
+    3.1. [MetalLB Setup](#31-metallb-setup)  
+    3.2. [Nginx-ingress controller and Ingress resource](#32-nginx-ingress-controller-and-ingress-resource)  
+    3.3. [TLS for Secure HTTPS Access](#33-tls-for-secure-https-access)
 4. [Testing the Cluster](#4-testing-the-cluster)
 5. [Scaling and Resource Limits](#5-scaling-and-resource-limits)  
-      5.1. [Resources Limits](#51-resources-limits)  
-      5.2. [Implementing Horizontal Pod Autoscaler (HPA)](#52-implementing-horizontal-pod-autoscaler-hpa)
-6. [Pod Security and Network Policy](#6-pod-security-and-network-policy)
-      6.1. [Using securityContext](#61-using-securitycontext)
-      6.2. [Using Network Policy](#62-using-network-policy)
-8. Actual Orchestration
+    5.1. [Resources Limits](#51-resources-limits)  
+    5.2. [Implementing Horizontal Pod Autoscaler (HPA)](#52-implementing-horizontal-pod-autoscaler-hpa)
+6. [Pod Security and Network Policy](#6-pod-security-and-network-policy)  
+    6.1. [Using securityContext](#61-using-securitycontext)  
+    6.2. [Using Network Policy](#62-using-network-policy)
+7. [Actual Orchestration](#7-actual-orchestration)
 
 
 
@@ -750,8 +750,6 @@ At Container-level in all frontend, backend and mongo pods, securityContext insi
           - ALL
 ```
 
-
-
 What these do ?
 - runAsNonRoot: true → prevents running as root
 - allowPrivilegeEscalation: false → blocks sudo-like privilege escalation
@@ -794,8 +792,12 @@ Let's address each service:
         volumeMounts:
         - name: nginx-cache
           mountPath: /var/cache/nginx
+        - name: nginx-run
+          mountPath: /var/run
       volumes:
       - name: nginx-cache
+        emptyDir: {}
+      - name: nginx-run
         emptyDir: {}
    ```
    
@@ -814,18 +816,20 @@ Let's address each service:
         template:
           spec:
             containers:
+   
             - name: backend-crud-webapp
               securityContext:
                 readOnlyRootFilesystem: true
-              command: ["sh", "-c"]
-              args: ["npm start -- --cache /tmp"]  # Disabling npm cache
-              # OR use a volume:
-              # volumeMounts:
-              # - name: npm-cache
-              #   mountPath: /home/node/.npm
-            # volumes:
-            # - name: npm-cache
-            #   emptyDir: {}
+                volumeMounts:
+                - name: npm-cache
+                  mountPath: /home/node/.npm
+              volumes:
+              - name: npm-cache
+                emptyDir: {}
+              # OR disable npm cache:
+              # command: ["sh", "-c"]
+              # args: ["npm start -- --cache /tmp"]  # Disabling npm cache
+              
    ```
    
  - MongoDB:
@@ -854,3 +858,124 @@ Let's address each service:
    
 
 ### 6.2. Using Network Policy
+
+By default, if no policies are defined, all pods can communicate with each other. This is a security risk because if one pod is compromised, an attacker can easily access other pods.
+
+Now, lets block all traffic by default (ingress & egress) and explicitly grant ingress → frontend and ingress → backend → MongoDB traffic.
+- This matters because it limits blast radius if a pod is compromised, enforces zero-trust within the cluster.
+
+- This default-deny policy blocks all incoming (ingress) and outgoing (egress) traffic for all pods in the namespace.
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+```
+
+- Let's allow all pods to egress to the DNS server (CoreDNS) in the `kube-system` namespace on UDP port 53 for DNS resolution.
+  Without DNS, service discovery fails. This policy is essential for allowing pods to resolve service names (like `backend`, `web-mongodb`). It's a necessary exception to the default-deny.
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+spec:
+  podSelector: {}
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+```
+
+- Ensure that only the Ingress Controller can talk to the frontend pods, and only on the required port. It prevents direct access to the frontend from other pods or outside the cluster (unless through the Ingress).
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-frontend
+spec:
+  podSelector:
+    matchLabels:
+      app: frontend
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 8080
+```
+
+- Next, Ingress Controller routes some paths (e.g., `/students`) to the backend service. Without this, the Ingress Controller would be blocked by the default-deny when trying to reach the backend.
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-backend
+spec:
+  podSelector:
+    matchLabels:
+      app: backend
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 4000  # Matches backend containerPort
+```
+
+- This policy enables the frontend to call the backend APIs. It is a typical microservice communication pattern. Without this, the frontend would be blocked by the default-deny when trying to reach the backend.
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-frontend-to-backend
+spec:
+  podSelector:
+    matchLabels:
+      app: backend
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: frontend
+    ports:
+    - protocol: TCP
+      port: 4000
+```
+
+- Finally, we secures the database so that only the backend can access it. It prevents other pods (like the frontend or any others) from connecting to the database.
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-backend-to-mongo
+spec:
+  podSelector:
+    matchLabels:
+      app: web-mongodb
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: backend
+    ports:
+    - protocol: TCP
+      port: 27017
+```
+
+############## Mongo As stateful set ###############
