@@ -979,3 +979,6 @@ spec:
 ```
 
 ############## Mongo As stateful set ###############
+
+### Automating , Penetration Testing in Kubernetes ###
+### Automating pod scale up if resources is high ###
