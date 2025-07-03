@@ -980,5 +980,45 @@ spec:
 
 ############## Mongo As stateful set ###############
 
+### Core Understanding
+
+We are using a Persistent Volume (PV) backed by NFS for MongoDB. Since NFS supports ReadWriteMany access mode, multiple pods can mount the same volume simultaneously. However, MongoDB is not designed to run multiple replicas of the same database instance (i.e., the same data directory) in a shared storage setup.
+
+The requirement here is to use a single NFS volume for the MongoDB data. If we are using a single NFS volume and mount it to multiple MongoDB pods, all pods would be writing to the same data files, which would lead to data corruption and conflicts because MongoDB doesn't support this.
+
+### HOW ?
+Even though it's technically possible to create one RWX NFS PV, bind it to multiple PVCs, and then mount them into multiple MongoDB pods...it will lead to data corruption.
+
+Because of File-level interference:
+- MongoDB isn't designed for multiple processes to simultaneously access the same underlying data files (even if mounted via different paths).
+- Even though the PVCs are separate objects, they still point to the same directory (the same files) on the NFS server. We must have separate volumes for each MongoDB instance( or pods).
+- RWX allows multiple mounts, but it doesn't prevent overlapping writes or corrupted journals. Databases like MongoDB need exclusive file access to operate reliably.
+
+MongoDB expects:
+- Each replica to have its own isolated data folder
+- Full control of the files in that folder (locking, journaling, flushing, etc.)
+- No shared access from other MongoDB instances
+
+### SOLUTION:
+What Maintains Data Consistency in MongoDB Replica Set?
+- Answer: MongoDB itself — not the storage or Kubernetes — is responsible for maintaining data consistency.
+- Yes, only one pod (the Primary) in replicas handles all write operations (insert/update/delete). The other pods are Secondaries, and they replicate data from the Primary. MongoDB itself (via its Replica Set election mechanism) is responsible for choosing which pod is Primary.
+
+We can run this command inside a pod to see the replica set status:
+```bash
+mongo --eval 'rs.status()'
+```
+
+Next, at the same time we are setting up Dynamic Provisioning with NFS.
+
+Steps:
+ 1. Deploy an NFS provisioner (if not already present) to enable dynamic provisioning for NFS.
+ 2. Create a StorageClass for dynamic provisioning.
+ 3. Convert the Deployment to a StatefulSet and use volumeClaimTemplates.
+ 4. Update the MongoDB image to a stable version (avoiding release candidates) and configure the replica set.
+ 5. Use a headless service for StatefulSet.
+
+### Install NFS Provisioner
+
 ### Automating , Penetration Testing in Kubernetes ###
 ### Automating pod scale up if resources is high ###
