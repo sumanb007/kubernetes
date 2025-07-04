@@ -980,6 +980,8 @@ spec:
 
 ############## Mongo As stateful set ###############
 
+**Our goal:** Scale MongoDB seamlessly without manually creating PersistentVolumes (PVs) for each replica, while ensuring data consistency and reliable storage.
+
 ### Core Understanding
 
 We are using a Persistent Volume (PV) backed by NFS for MongoDB. Since NFS supports ReadWriteMany access mode, multiple pods can mount the same volume simultaneously. However, MongoDB is not designed to run multiple replicas of the same database instance (i.e., the same data directory) in a shared storage setup.
@@ -1009,14 +1011,14 @@ We can run this command inside a pod to see the replica set status:
 mongo --eval 'rs.status()'
 ```
 
-Next, at the same time we are setting up Dynamic Provisioning with NFS.
 
-Steps:
- 1. Deploy an NFS provisioner (if not already present) to enable dynamic provisioning for NFS.
- 2. Create a StorageClass for dynamic provisioning.
- 3. Convert the Deployment to a StatefulSet and use volumeClaimTemplates.
- 4. Update the MongoDB image to a stable version (avoiding release candidates) and configure the replica set.
- 5. Use a headless service for StatefulSet.
+So, we will do it in Steps:
+ 1. First deploy an NFS provisioner as a Pod to enable dynamic provisioning for NFS.
+    - This pod acts as a dynamic storage controller inside Kubernetes cluster.
+ 3. Create a StorageClass for dynamic provisioning.
+ 4. Convert the Deployment to a StatefulSet and use volumeClaimTemplates.
+ 5. Update the MongoDB image to a stable version (avoiding release candidates) and configure the replica set.
+ 6. Use a headless service for StatefulSet.
 
 ### Install NFS Provisioner
 
