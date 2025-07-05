@@ -1022,5 +1022,67 @@ So, we will do it in Steps:
 
 ### Install NFS Provisioner
 
+- First, we allows egress from all pods in the default namespace to the master node's IP (192.168.1.11) on port 6443. Why ? Because we have blocked the all default traffic in above network policies. So let's configure a policy.
+  The network policy `allow-apiserver-access`
+  ```yaml
+  apiVersion: networking.k8s.io/v1
+  kind: NetworkPolicy
+  metadata:
+    name: allow-apiserver-access
+    namespace: default
+  spec:
+    podSelector: {}
+    policyTypes:
+    - Egress
+    egress:
+    - to:
+      - ipBlock:
+          cidr: 192.168.1.11/32  # Master node IP
+      ports:
+      - protocol: TCP
+        port: 6443
+  ```
+  We didn't have a network policy allowing egress to the API server. We added `allow-apiserver-access` to allow egress to the master node's IP on port 6443.
+
+  **Alternatively** we can choose, to do this.
+  ```bash
+  kubectl label node masternode.k8s.com role=control-plane component=kube-apiserver
+  ```
+
+  then,
+    ```yaml
+    apiVersion: networking.k8s.io/v1
+    kind: NetworkPolicy
+    metadata:
+      name: allow-apiserver-access
+      namespace: default
+    spec:
+      podSelector: {}
+      policyTypes:
+      - Egress
+      egress:
+      - to:
+        - nodeSelector:
+            matchLabels:
+              role: control-plane
+              component: kube-apiserver
+        ports:
+        - protocol: TCP
+          port: 6443
+     ```
+  
+- Then, we need to create RBAC permissions for the NFS provisioner because by default it doesn't have the necessary permissions to manage PersistentVolumes and PersistentVolumeClaims.
+  So, before running the NFS provisioner manifest, we should:
+   a. Create the RBAC resources (ServiceAccount, ClusterRole, ClusterRoleBinding).
+   b. Modify the deployment to use that ServiceAccount.
+
+  Why This is Necessary
+
+    - Kubernetes has a zero-trust security model
+    - Pods get minimal permissions by default
+    - Storage provisioners need elevated privileges to manage cluster resources
+    - RBAC ensures least-privilege access
+
+### Setup above Application in custom namespace
 ### Automating , Penetration Testing in Kubernetes ###
 ### Automating pod scale up if resources is high ###
