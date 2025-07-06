@@ -482,7 +482,7 @@ Then later `curl` with '-k' option as encryption does not allow anyother host to
 - Verify service endpoints
   `kubectl get endpoints`
 
-- Verify MetalLB assignment. Look for Type: LoadBalancer and External-IP to be your network IP.
+- Verify MetalLB assignment. Look for Type: LoadBalancer and External-IP to be wer network IP.
   ```bash
   kubectl get svc -n ingress-nginx
   ```
@@ -536,7 +536,7 @@ Then later `curl` with '-k' option as encryption does not allow anyother host to
   kubectl exec -it web-mongodb-76c57d566d-sh4lk -- mongo studentDB
   ```
 
-- You should see:
+- we should see:
   ```
   mongo
   MongoDB shell version v5.0.x
@@ -978,7 +978,7 @@ spec:
       port: 27017
 ```
 
-############## Mongo As stateful set ###############
+## 5.3. Mongo As Statefulset 
 
 **Our goal:** Scale MongoDB seamlessly without manually creating PersistentVolumes (PVs) for each replica, while ensuring data consistency and reliable storage.
 
@@ -986,44 +986,48 @@ spec:
 
 We are using a Persistent Volume (PV) backed by NFS for MongoDB. Since NFS supports ReadWriteMany access mode, multiple pods can mount the same volume simultaneously. However, MongoDB is not designed to run multiple replicas of the same database instance (i.e., the same data directory) in a shared storage setup.
 
-The requirement here is to use a single NFS volume for the MongoDB data. If we are using a single NFS volume and mount it to multiple MongoDB pods, all pods would be writing to the same data files, which would lead to data corruption and conflicts because MongoDB doesn't support this.
+But, the requirement here fails if to use a single NFS volume for the MongoDB data and to scale up instances(pods). If we are using a single NFS volume and plan to mount it to multiple MongoDB pods, all pods would be writing to the same data files, which would lead to data corruption and conflicts because MongoDB doesn't support this.
 
 ### HOW ?
-Even though it's technically possible to create one RWX NFS PV, bind it to multiple PVCs, and then mount them into multiple MongoDB pods...it will lead to data corruption.
-
-Because of File-level interference:
-- MongoDB isn't designed for multiple processes to simultaneously access the same underlying data files (even if mounted via different paths).
-- Even though the PVCs are separate objects, they still point to the same directory (the same files) on the NFS server. We must have separate volumes for each MongoDB instance( or pods).
-- RWX allows multiple mounts, but it doesn't prevent overlapping writes or corrupted journals. Databases like MongoDB need exclusive file access to operate reliably.
 
 MongoDB expects:
 - Each replica to have its own isolated data folder
 - Full control of the files in that folder (locking, journaling, flushing, etc.)
 - No shared access from other MongoDB instances
 
+Even though it's technically possible to create one RWX NFS PV, bind it to multiple PVCs, and then mount them into multiple MongoDB pods...it will lead to data corruption.
+
+Because of File-level interference:
+- MongoDB isn't designed for multiple processes to simultaneously access the same underlying data files (even if mounted via different paths).
+- Even though the PVCs are separate objects, they still point to the same directory (the same files) on the NFS server. So, we must have separate volumes for each MongoDB instance( or pods).
+- RWX allows multiple mounts, but it doesn't prevent overlapping writes or corrupted journals. Databases like MongoDB need exclusive file access to operate reliably.
+
+
 ### SOLUTION:
-What Maintains Data Consistency in MongoDB Replica Set?
+So, how we maintain Data consistency while still scaling in replicas ? What Maintains Data Consistency in MongoDB Replica Set?
 - Answer: MongoDB itself — not the storage or Kubernetes — is responsible for maintaining data consistency.
-- Yes, only one pod (the Primary) in replicas handles all write operations (insert/update/delete). The other pods are Secondaries, and they replicate data from the Primary. MongoDB itself (via its Replica Set election mechanism) is responsible for choosing which pod is Primary.
+- Yes. So, when we plan to scale mongo pods, only one pod (the Primary) in replicas handles all write operations (insert/update/delete). The other pods are Secondaries, and they replicate data from the Primary. MongoDB itself (via its Replica Set election mechanism) is responsible for choosing which pod is Primary.
 
 We can run this command inside a pod to see the replica set status:
 ```bash
 mongo --eval 'rs.status()'
 ```
 
-
-So, we will do it in Steps:
+**So our goal is to dynamically scale mongo pod. How we do that ?**
+We will design our goal in Steps:
  1. First deploy an NFS provisioner as a Pod to enable dynamic provisioning for NFS.
     - This pod acts as a dynamic storage controller inside Kubernetes cluster.
  3. Create a StorageClass for dynamic provisioning.
- 4. Convert the Deployment to a StatefulSet and use volumeClaimTemplates.
+ 4. Convert the mongo Deployment to a StatefulSet and use volumeClaimTemplates.
  5. Update the MongoDB image to a stable version (avoiding release candidates) and configure the replica set.
  6. Use a headless service for StatefulSet.
 
-### Install NFS Provisioner
+### 5.3.1 Install NFS Provisioner
 
-- First, we allows egress from all pods in the default namespace to the master node's IP (192.168.1.11) on port 6443. Why ? Because we have blocked the all default traffic in above network policies. So let's configure a policy.
-  The network policy `allow-apiserver-access`
+- First, we allows egress from all pods in the default namespace to the master node's IP (192.168.1.11) on port 6443. Why ? Because we have blocked the all default traffic in above network policies. 
+
+  So let's configure and a policy to our `networkPolicy.yml`.
+  The network policy `allow-apiserver-access` as
   ```yaml
   apiVersion: networking.k8s.io/v1
   kind: NetworkPolicy
@@ -1041,47 +1045,142 @@ So, we will do it in Steps:
       ports:
       - protocol: TCP
         port: 6443
+    - to:  # Keep DNS access
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: kube-system
+      ports:
+      - protocol: UDP
+        port: 53
   ```
-  We didn't have a network policy allowing egress to the API server. We added `allow-apiserver-access` to allow egress to the master node's IP on port 6443.
+  We didn't have a network policy allowing egress to the API server. That's the reason we added `allow-apiserver-access` to allow egress to the master node's IP on port 6443.
 
-  **Alternatively** we can choose, to do this.
-  ```bash
-  kubectl label node masternode.k8s.com role=control-plane component=kube-apiserver
-  ```
+  Kubernetes NetworkPolicy best supports IP-based configuration to ensure consistent behavior across all components rather than hostname-based rules. Also, direct IP access reduces latency and potential DNS lookup failures.
 
-  then,
-    ```yaml
-    apiVersion: networking.k8s.io/v1
-    kind: NetworkPolicy
-    metadata:
-      name: allow-apiserver-access
-      namespace: default
-    spec:
-      podSelector: {}
-      policyTypes:
-      - Egress
-      egress:
-      - to:
-        - nodeSelector:
-            matchLabels:
-              role: control-plane
-              component: kube-apiserver
-        ports:
-        - protocol: TCP
-          port: 6443
-     ```
+  This bypasses all DNS resolution issues; allows traffic explicitly to the API server IP; and consistent Approach that matches our kube-proxy configuration
   
-- Then, we need to create RBAC permissions for the NFS provisioner because by default it doesn't have the necessary permissions to manage PersistentVolumes and PersistentVolumeClaims.
+- Next, we need to create RBAC permissions for the NFS provisioner because by default it doesn't have the necessary permissions to manage PersistentVolumes and PersistentVolumeClaims.
   So, before running the NFS provisioner manifest, we should:
    a. Create the RBAC resources (ServiceAccount, ClusterRole, ClusterRoleBinding).
    b. Modify the deployment to use that ServiceAccount.
 
-  Why This is Necessary
+  Why This is Necessary ?
 
     - Kubernetes has a zero-trust security model
     - Pods get minimal permissions by default
     - Storage provisioners need elevated privileges to manage cluster resources
     - RBAC ensures least-privilege access
+
+    ```yaml
+    apiVersion: v1
+    kind: ServiceAccount
+    metadata:
+      name: nfs-provisioner
+      namespace: default
+    ---
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRole
+    metadata:
+      name: nfs-provisioner-role
+    rules:
+    - apiGroups: [""]
+      resources: ["endpoints", "persistentvolumes", "persistentvolumeclaims", "events"]
+      verbs: ["*"]
+    - apiGroups: ["storage.k8s.io"]
+      resources: ["storageclasses"]
+      verbs: ["*"]
+    ---
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRoleBinding
+    metadata:
+      name: nfs-provisioner-binding
+    subjects:
+    - kind: ServiceAccount
+      name: nfs-provisioner
+      namespace: default
+    roleRef:
+      kind: ClusterRole
+      name: nfs-provisioner-role
+      apiGroup: rbac.authorization.k8s.io
+  ```
+
+- Now we write manifest to install nfs-provisioner in kubernetes network. This NFS provisioner acts as a PersistentVolume provisioner in Kubernetes. It automatically creates PVs backed by NFS storage when a PersistentVolumeClaim (PVC) is created.
+   - Then we create a StorageClass that references the provisioner (`k8s-sigs.io/nfs-subdir-external-provisioner`). So, when a PVC requests storage from this StorageClass, the provisioner creates a new PV.
+   - For each PVC, the provisioner creates a new directory on the NFS server at the path: `<NFS_PATH>/<namespace>-<pvcname>-<pvname>`.
+   - The PV is then mounted to that directory.
+   - When we scale a StatefulSet, each replica (pod) gets its own unique PVC.
+     For example, if we have 3 replicas, we'll have 3 PVCs (and thus 3 PVs).
+   - When we scale up (e.g., from 3 to 5 replicas), the StatefulSet controller creates new PVCs for the new replicas.
+   - The NFS provisioner automatically provisions a new PV for each new PVC.
+   - Each new MongoDB pod will then mount its own PV (NFS directory).
+   - The PVCs are named as: `<volumeClaimTemplates-name>-<statefulset-name>-<index>`.
+
+The StatefulSet ensures that each pod gets a stable network identity and stable storage (via the PVC template).
+`nfs-provisioner.yml`
+   ```yaml
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: nfs-provisioner
+      namespace: default
+    spec:
+      replicas: 1
+      selector:
+        matchLabels:
+          app: nfs-provisioner
+      strategy:
+        type: Recreate
+      template:
+        metadata:
+          labels:
+            app: nfs-provisioner
+        spec:
+          serviceAccountName: nfs-provisioner
+          containers:
+          - name: nfs-provisioner
+            image: k8s.gcr.io/sig-storage/nfs-subdir-external-provisioner:v4.0.2
+            volumeMounts:
+            - name: nfs-root
+              mountPath: /persistentvolumes
+            env:
+            - name: KUBERNETES_SERVICE_HOST
+              value: "192.168.1.11"
+            - name: KUBERNETES_SERVICE_PORT
+              value: "6443"
+            - name: PROVISIONER_NAME
+              value: k8s-sigs.io/nfs-subdir-external-provisioner
+            - name: NFS_SERVER
+              value: 192.168.1.110
+            - name: NFS_PATH
+              value: /mnt/sdb2-partition/mongo-NFS-server
+          volumes:
+          - name: nfs-root
+            nfs:
+              server: 192.168.1.110
+              path: /mnt/sdb2-partition/mongo-NFS-server
+   ```
+  
+- Let's apply manifests now.
+  ```bash
+  kubectl apply -f networkPolicy.yml
+  kubectl apply -f nfs-rbac.yml
+  kubectl apply -f nfs-provisioner.yml
+  ```
+  
+- Finally, let's verify API server connectivity from a test pod:
+  ```bash
+  kubectl run test --image=nicolaka/netshoot --rm -it --restart=Never -- curl -vk https://192.168.1.11:6443
+  ```
+  The 403 Forbidden response is expected and positive - which means:
+  - Network connectivity to 192.168.1.11:6443 is working.
+  - TLS handshake is successful.
+  - API server is responding.
+
+### 5.3.2 storageClass and PVC Provisioning
+
+
+
+
 
 ### Setup above Application in custom namespace
 ### Automating , Penetration Testing in Kubernetes ###
