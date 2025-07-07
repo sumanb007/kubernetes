@@ -982,6 +982,16 @@ spec:
 
 **Our goal:** Scale MongoDB seamlessly without manually creating PersistentVolumes (PVs) for each replica, while ensuring data consistency and reliable storage.
 
+The steps for MongoDB scaling:
+ 1. We define the StorageClass that points to our NFS provisioner.
+ 2. The StatefulSet's `volumeClaimTemplate` uses that StorageClass.
+ 3. When we scale up the StatefulSet, for each new replica:
+    - The StatefulSet controller creates a new PVC (with a unique name) based on the template.
+    - The provisioner (which is our NFS provisioner deployment) sees the new PVC and dynamically creates a PV that is bound to that PVC.
+    - The PV is backed by a new directory on the NFS server (the provisioner creates this directory).
+    - The pod for the new replica is started and mounts the PV (i.e., the NFS directory) to its data path.
+ This allows each MongoDB replica to have its own persistent storage, and the process is fully automated.
+
 ### Core Understanding
 
 We are using a Persistent Volume (PV) backed by NFS for MongoDB. Since NFS supports ReadWriteMany access mode, multiple pods can mount the same volume simultaneously. However, MongoDB is not designed to run multiple replicas of the same database instance (i.e., the same data directory) in a shared storage setup.
@@ -1004,7 +1014,7 @@ Because of File-level interference:
 
 
 ### SOLUTION:
-So, how we maintain Data consistency while still scaling in replicas ? What Maintains Data Consistency in MongoDB Replica Set?
+So, how we maintain Data consistency while still scaling replicas ? What Maintains Data Consistency in MongoDB Replica Set?
 - Answer: MongoDB itself — not the storage or Kubernetes — is responsible for maintaining data consistency.
 - Yes. So, when we plan to scale mongo pods, only one pod (the Primary) in replicas handles all write operations (insert/update/delete). The other pods are Secondaries, and they replicate data from the Primary. MongoDB itself (via its Replica Set election mechanism) is responsible for choosing which pod is Primary.
 
@@ -1021,6 +1031,7 @@ We will design our goal in Steps:
  4. Convert the mongo Deployment to a StatefulSet and use volumeClaimTemplates.
  5. Update the MongoDB image to a stable version (avoiding release candidates) and configure the replica set.
  6. Use a headless service for StatefulSet.
+
 
 ### 5.3.1 Install NFS Provisioner
 
@@ -1061,8 +1072,8 @@ We will design our goal in Steps:
   
 - Next, we need to create RBAC permissions for the NFS provisioner because by default it doesn't have the necessary permissions to manage PersistentVolumes and PersistentVolumeClaims.
   So, before running the NFS provisioner manifest, we should:
-   a. Create the RBAC resources (ServiceAccount, ClusterRole, ClusterRoleBinding).
-   b. Modify the deployment to use that ServiceAccount.
+  1. Create the RBAC resources (ServiceAccount, ClusterRole, ClusterRoleBinding).
+  2. Modify the deployment to use that ServiceAccount.
 
   Why This is Necessary ?
 
@@ -1070,6 +1081,9 @@ We will design our goal in Steps:
     - Pods get minimal permissions by default
     - Storage provisioners need elevated privileges to manage cluster resources
     - RBAC ensures least-privilege access
+
+  To avoid leader election errors about endpoints, then we need to add the endpoints resource to the RBAC role.
+  We might see errors in the logs about not being able to get endpoints so we should update the ClusterRole to include endpoints too.
 
     ```yaml
     apiVersion: v1
@@ -1176,10 +1190,59 @@ The StatefulSet ensures that each pod gets a stable network identity and stable 
   - TLS handshake is successful.
   - API server is responding.
 
-### 5.3.2 storageClass and PVC Provisioning
+
+### 5.3.2 StorageClass and PVC Provisioning
+
+This acts as the storage "blueprint" for dynamic provisioning. Abstracts the underlying NFS storage from applications.
+Without a StorageClass, we would have to manually create PVs for each PVC, which is not scalable. When the MongoDB StatefulSet creates a new pod (replica), it will create a PVC based on the template, and the NFS provisioner will automatically provision a PV and bind to that PVC. When a PVC is created and specifies the StorageClass (by name), the provisioner associated with that StorageClass will dynamically create a PV for that PVC.
+
+`nfs-storageclass.yml`
+```yaml
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: nfs-sc
+provisioner: k8s-sigs.io/nfs-subdir-external-provisioner  # Critical link
+parameters:
+  archiveOnDelete: "false"
+```
+This binds storage requests to our NFS provisioner. The provisioner field matches the PROVISIONER_NAME in the NFS deployment
+
+Next, when MongoDB requests storage via PVC, the StorageClass intercepts PVC creation, identifies the provisioner (k8s-sigs.io/nfs-subdir-external-provisioner) and triggers the provisioner to create a PersistentVolume. 
+Let's write PVC:
+```yaml
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: mongodb-data
+spec:
+  storageClassName: nfs-sc  # References our StorageClass
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+```
 
 
 
+
+Required Files Summary
+nfs-rbac.yml - RBAC permissions
+nfs-provisioner.yml - Deployment with service account reference
+networkPolicy.yml - Contains allow-apiserver-access policy
+nfs-storageclass.yml - StorageClass definition
+test-pvc.yml - Test PVC for verification
+Key Lessons Learned
+
+RBAC is Critical: Provisioners require explicit permissions to manage storage resources
+Network Isolation Matters: Network policies can block API server access
+Service Accounts: Must be explicitly referenced in deployments
+Cluster Networking: Service network routes must be properly configured
+Order of Operations:
+RBAC before deployment
+Network policies before pod creation
+StorageClass before PVC creation
 
 
 ### Setup above Application in custom namespace
