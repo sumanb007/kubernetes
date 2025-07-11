@@ -978,7 +978,7 @@ spec:
       port: 27017
 ```
 
-## 5.3. Mongo As Statefulset 
+## 5.3. Scaling Mongo As Statefulset 
 
 **Our goal:** Scale MongoDB seamlessly without manually creating PersistentVolumes (PVs) for each replica, while ensuring data consistency and reliable storage.
 
@@ -1193,8 +1193,12 @@ The StatefulSet ensures that each pod gets a stable network identity and stable 
 
 ### 5.3.2 StorageClass and PVC Provisioning
 
+**StorageClass**
+
 This acts as the storage "blueprint" for dynamic provisioning. Abstracts the underlying NFS storage from applications.
-Without a StorageClass, we would have to manually create PVs for each PVC, which is not scalable. When the MongoDB StatefulSet creates a new pod (replica), it will create a PVC based on the template, and the NFS provisioner will automatically provision a PV and bind to that PVC. When a PVC is created and specifies the StorageClass (by name), the provisioner associated with that StorageClass will dynamically create a PV for that PVC.
+- Without a StorageClass, we would have to manually create PVs for each PVC, which is not scalable.
+- When the MongoDB StatefulSet creates a new pod (replica), it will create a PVC based on the template, and the NFS provisioner will automatically provision a PV and bind to that PVC.
+- When a PVC is created and specifies the StorageClass (by name), the provisioner associated with that StorageClass will dynamically create a PV for that PVC.
 
 `nfs-storageclass.yml`
 ```yaml
@@ -1205,10 +1209,15 @@ metadata:
 provisioner: k8s-sigs.io/nfs-subdir-external-provisioner  # Critical link
 parameters:
   archiveOnDelete: "false"
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
 ```
 This binds storage requests to our NFS provisioner. The provisioner field matches the PROVISIONER_NAME in the NFS deployment
 
+**PVC Provisioning**
+
 Next, when MongoDB requests storage via PVC, the StorageClass intercepts PVC creation, identifies the provisioner (k8s-sigs.io/nfs-subdir-external-provisioner) and triggers the provisioner to create a PersistentVolume. 
+
 Let's write PVC:
 ```yaml
 kind: PersistentVolumeClaim
@@ -1224,7 +1233,24 @@ spec:
       storage: 1Gi
 ```
 
+Here's how to identify which PVC a PV is bound to:
 
+```bash
+kubectl get pv,pvc
+kubectl describe pv <pv-name>
+```
+Key Field to Look For:
+`Claim:`
+This field shows the PVC that the PV is bound to in the format: namespace/pvc-name
+
+### 5.3.3 Mongo StatefulSet
+
+We are replacing the Deployment with a StatefulSet (sts). 
+ Important changes for StatefulSet:
+ 1. We use `serviceName` under svc.spec. to specify the headless service that controls the network domain.
+ 2. Each pod in a StatefulSet gets a stable hostname based on the StatefulSet name and the ordinal index (e.g., web-mongodb-0).
+ 3. We use `volumeClaimTemplates` under sts.spec. for persistent storage. This will dynamically create a PVC for each pod.
+ 4. Configure MongoDB to start as a replica set by passing the `--replSet` flag.
 
 
 Required Files Summary
