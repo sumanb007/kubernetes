@@ -1247,10 +1247,80 @@ This field shows the PVC that the PV is bound to in the format: namespace/pvc-na
 
 We are replacing the Deployment with a StatefulSet (sts). 
  Important changes for StatefulSet:
- 1. We use `serviceName` under svc.spec. to specify the headless service that controls the network domain.
+ 1. We use `serviceName` under sts.spec. to specify the headless service that controls the network domain.
+    `serviceName: web-mongodb-headless`
+    
  2. Each pod in a StatefulSet gets a stable hostname based on the StatefulSet name and the ordinal index (e.g., web-mongodb-0).
  3. We use `volumeClaimTemplates` under sts.spec. for persistent storage. This will dynamically create a PVC for each pod.
- 4. Configure MongoDB to start as a replica set by passing the `--replSet` flag.
+      ```yaml
+      volumeClaimTemplates:
+      - metadata:
+          name: mongo-storage
+        spec:
+          accessModes: [ "ReadWriteOnce" ]
+          storageClassName: nfs-sc
+          resources:
+            requests:
+              storage: 1Gi
+      ```
+      
+ 4. Configure MongoDB to start as a replica set by passing the `--replSet` flag under .containers.command
+     ```yaml
+      command:  
+        - mongod
+        - --bind_ip_all
+        - --replSet
+        - rs0
+      ```
+     
+ 5. And we add headless service in the manifest.
+    ```yaml  
+    apiVersion: v1
+    kind: Service
+    metadata:
+      name: web-mongodb-headless
+    spec:
+      clusterIP: None  # headless required for sts
+      selector:
+        app: web-mongodb
+      ports:
+      - port: 27017
+        targetPort: 27017
+    ```
+    **WHy?** Pods need to talk to each other by name. Without a headless service, pods only get a shared name (like a common receptionist) and can’t call each other directly.
+    MongoDB sts pods needs to:
+    - Know who the other members are
+    - Elect a primary (the leader pod)
+    - Keep all data in sync between members
+
+Now, We save the changes to `mongodb-sts.yml` and apply it
+
+```bash
+kubectl create -f mongodb-sts.yml
+kubectl logs web-mongodb-4
+kubectl exec -it web-mongodb-0 -- mongo --eval 'rs.status()'
+```
+
+Verifying these pods log we find that 'Replication has not yet been configured'
+`"errmsg" : "no replset config has been received",`
+`"codeName" : "NotYetInitialized"`
+
+Even though you’ve deployed MongoDB with the --replSet rs0 flag, MongoDB does not automatically initialize a replica set. We have to do it manually from one pod, usually the first one (e.g. web-mongodb-0).
+
+So, let's connect to web-mongodb-0:
+`kubectl exec -it web-mongodb-0 -- mongo`
+Run the replica set initiation command:
+```sh
+rs.initiate({
+  _id: "rs0",
+  members: [
+    { _id: 0, host: "web-mongodb-0.mongo:27017" },
+    { _id: 1, host: "web-mongodb-1.mongo:27017" },
+    { _id: 2, host: "web-mongodb-2.mongo:27017" }
+  ]
+})
+```
+
 
 
 Required Files Summary
