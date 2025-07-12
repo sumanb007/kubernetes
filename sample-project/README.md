@@ -1246,6 +1246,7 @@ This field shows the PVC that the PV is bound to in the format: namespace/pvc-na
 ### 5.3.3 Mongo StatefulSet
 
 We are replacing the Deployment with a StatefulSet (sts). 
+
  Important changes for StatefulSet:
  1. We use `serviceName` under sts.spec. to specify the headless service that controls the network domain.
     `serviceName: web-mongodb-headless`
@@ -1262,6 +1263,12 @@ We are replacing the Deployment with a StatefulSet (sts).
           resources:
             requests:
               storage: 1Gi
+      ```
+ 4. Remove the static PVC volumes
+      ```yaml
+      - name: mongo-storage
+        persistentVolumeClaim:
+          claimName: mongodb-data
       ```
       
  4. Configure MongoDB to start as a replica set by passing the `--replSet` flag under .containers.command
@@ -1287,7 +1294,8 @@ We are replacing the Deployment with a StatefulSet (sts).
       - port: 27017
         targetPort: 27017
     ```
-    **WHy?** Pods need to talk to each other by name. Without a headless service, pods only get a shared name (like a common receptionist) and can’t call each other directly.
+    **Why?** Pods need to talk to each other by name. Without a headless service, pods only get a shared name (like a common receptionist) and can’t call each other directly.
+
     MongoDB sts pods needs to:
     - Know who the other members are
     - Elect a primary (the leader pod)
@@ -1305,21 +1313,92 @@ Verifying these pods log we find that 'Replication has not yet been configured'
 `"errmsg" : "no replset config has been received",`
 `"codeName" : "NotYetInitialized"`
 
-Even though you’ve deployed MongoDB with the --replSet rs0 flag, MongoDB does not automatically initialize a replica set. We have to do it manually from one pod, usually the first one (e.g. web-mongodb-0).
+Even though we’ve deployed MongoDB with the --replSet rs0 flag, MongoDB does not automatically initialize a replica set. We have to do it manually from one pod, usually the first one (e.g. web-mongodb-0).
 
-So, let's connect to web-mongodb-0:
-`kubectl exec -it web-mongodb-0 -- mongo`
-Run the replica set initiation command:
+But, before to move further, let's recall that network policy we applied.
+- Because the pods on different nodes, the traffic between nodes is being blocked at the node level (not by Kubernetes NetworkPolicy but by the underlying node network configuration).
+- Issue is MongoDB pods on different nodes cannot communicate due to the default network policies blocking cross-node traffic.
+
+
+MongoDB replica sets require bidirectional communication:
+- Pod A → Pod B: Connection initiation
+- Pod B → Pod A: Acknowledgment/response
+
+So we try a workaround by creating a new NetworkPolicy that allow traffic based on the node IP ranges.
+ The new NetworkPolicy `allow-mongo-cross-node`:
+   - Allows ingress from any IP in the node CIDR (172.16.0.0/16) to MongoDB pods (on port 27017)
+   - Allows egress to any IP in the node CIDR (172.16.0.0/16) on port 27017
+        
+   ```yaml
+    apiVersion: networking.k8s.io/v1
+    kind: NetworkPolicy
+    metadata:
+      name: allow-mongo-cross-node
+      namespace: default
+    spec:
+      podSelector:
+        matchLabels:
+          app: web-mongodb
+      policyTypes:
+      - Ingress
+      - Egress
+      ingress:
+      - from:
+        - ipBlock:
+            cidr: 172.16.0.0/16  # Allow from all nodes
+      egress:
+      - to:
+        - ipBlock:
+            cidr: 172.16.0.0/16
+        ports:
+        - protocol: TCP
+          port: 27017
+   ```
+
+### Key Fixes in This Policy:
+- **Added Egress Permission** allows MongoDB pods to initiate connections to other pods. Required for replica set formation.
+- **Used IP Blocks Instead of Pod Selectors**
+   - ipBlock: 172.16.0.0/16 covers all pods regardless of node
+   - Pod selectors alone don't handle cross-node traffic well
+- **Port-Specific Egress** Only allows egress on MongoDB port (27017). Maintains security while enabling required connectivity
+
+
+**Now**, let's connect to web-mongodb-0: Run the replica set initiation command:
 ```sh
-rs.initiate({
-  _id: "rs0",
+kubectl exec web-mongodb-0 -- mongo --eval "rs.initiate({
+  _id: 'rs0',
   members: [
-    { _id: 0, host: "web-mongodb-0.mongo:27017" },
-    { _id: 1, host: "web-mongodb-1.mongo:27017" },
-    { _id: 2, host: "web-mongodb-2.mongo:27017" }
+    {_id: 0, host: 'web-mongodb-0.web-mongodb-headless:27017'},
+    {_id: 1, host: 'web-mongodb-1.web-mongodb-headless:27017'},
+    {_id: 2, host: 'web-mongodb-2.web-mongodb-headless:27017'}
   ]
-})
+})"
 ```
+The replica set initialization command should return `{ "ok" : 1 }`, indicating success.
+
+
+Testing connectivity between pods using MongoDB's built-in client:
+**From web-mongodb-0 to web-mongodb-1**
+```bash
+kubectl exec web-mongodb-0 -- mongo --host web-mongodb-1.web-mongodb-headless --eval "db.adminCommand('ping')"
+```
+
+Let's do it with test pod too.
+```bash
+kubectl run dns-test --image=busybox:1.36 --rm -it --restart=Never -- nslookup web-mongodb-1.web-mongodb-headless.default.svc.cluster.local
+```
+
+**Which Pod is Primary ?** check for "stateStr" : "PRIMARY"
+```bash
+kubectl exec web-mongodb-0 -- mongo --eval "rs.status()"
+```
+
+### So do we need to initialize mongo replication each time we scale up pod now ?
+
+
+
+
+
 
 
 
