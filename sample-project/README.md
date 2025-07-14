@@ -1383,8 +1383,9 @@ Testing connectivity between pods using MongoDB's built-in client:
 kubectl exec web-mongodb-0 -- mongo --host web-mongodb-1.web-mongodb-headless --eval "db.adminCommand('ping')"
 ```
 
-Let's do it with test pod too.
+Next let's verify if a pod in cluster is able to both access sts and able to resolve dns.
 ```bash
+kubectl run debug-pod --rm -it --image nicolaka/netshoot --restart=Never -- bash -c "nc -zv web-mongodb 27017"
 kubectl run dns-test --image=busybox:1.36 --rm -it --restart=Never -- nslookup web-mongodb-1.web-mongodb-headless.default.svc.cluster.local
 ```
 
@@ -1393,14 +1394,35 @@ kubectl run dns-test --image=busybox:1.36 --rm -it --restart=Never -- nslookup w
 kubectl exec web-mongodb-0 -- mongo --eval "rs.status()"
 ```
 
-### So do we need to initialize mongo replication each time we scale up pod now ?
+### So then, do we need to add members to mongo replica each time we scale up pod ?
+Yes.  Note that MongoDB does not automatically add new members. We have to do it manually or with an automation tool. Here's the typical workflow:
+ 1. Initialize the replica set once (with the initial set of members).
+ 2. When scaling up, the StatefulSet creates new pods and new PVCs (if using volumeClaimTemplates) for the new members.
+ 3. Then, we must add the new members to the replica set configuration using `rs.add()`.
+
+However, note that when we scale down a StatefulSet, it removes the pod but leaves the PVC (because of the retain policy). So if we scale up again and the same pod (with the same index) comes back, it will reuse the PVC and the data
+
+### While we scale down ?
+
+If we scale down, we should also remove the members from the replica set configuration to avoid having unreachable members.
+However, scaling down a StatefulSet does not automatically remove the member from the replica set. we must do it manually.
+
+```bash
+rs.remove("web-mongodb-3.web-mongodb-headless:27017")  # Remove members
+```
+
+Scaling down the StatefulSet without removing the member from the replica set can cause issues because the replica set will keep trying to contact the removed pod.
+
+Therefore, the best practice is:
+   - To scale down: 
+        1. Remove the member from the replica set (using `rs.remove()` on the primary).
+        2. Then scale down the StatefulSet.
+   - To scale up:
+        1. Scale up the StatefulSet.
+        2. Then add the new member to the replica set.
 
 
-
-
-
-
-
+### Let's verify the application reachability now.
 
 Required Files Summary
 nfs-rbac.yml - RBAC permissions
