@@ -197,7 +197,7 @@ kubectl expose deployment backend --name=backend --port=5000 --target-port=4000 
 
 ### Mongodb yaml
 
-For mongodb, we will configure it to use nfs volume as PVC. 
+For mongodb, we will configure and create it to use nfs volume as PVC. 
 ```yaml
 apiVersion: apps/v1
 kind: Deployment
@@ -226,7 +226,6 @@ spec:
         persistentVolumeClaim:
           claimName: mongo-pvc
 ---
-# MONGODB Service (remains the same)
 apiVersion: v1
 kind: Service
 metadata:
@@ -1333,8 +1332,7 @@ So we try a workaround by creating a new NetworkPolicy that allow traffic based 
     apiVersion: networking.k8s.io/v1
     kind: NetworkPolicy
     metadata:
-      name: allow-mongo-cross-node
-      namespace: default
+      name: allow-mongo-replica-communication
     spec:
       podSelector:
         matchLabels:
@@ -1344,12 +1342,17 @@ So we try a workaround by creating a new NetworkPolicy that allow traffic based 
       - Egress
       ingress:
       - from:
-        - ipBlock:
-            cidr: 172.16.0.0/16  # Allow from all nodes
+        - podSelector:
+            matchLabels:
+              app: web-mongodb
+        ports:
+        - protocol: TCP
+          port: 27017
       egress:
       - to:
-        - ipBlock:
-            cidr: 172.16.0.0/16
+        - podSelector:
+            matchLabels:
+              app: web-mongodb
         ports:
         - protocol: TCP
           port: 27017
@@ -1423,6 +1426,67 @@ Therefore, the best practice is:
 
 
 ### Let's verify the application reachability now.
+
+```bash
+curl https://app.example.com/
+```
+
+Push data and verify
+```bash
+curl -X POST https://app.example.com/students/create-student -H "Content-Type: application/json" -d '{"name":"Suman Bhandari","email":"suman@example.com","rollNo":"111"}'
+curl https://app.example.com/students
+```
+
+We have a StatefulSet for MongoDB with 3 replicas, each having its own PersistentVolumeClaim (PVC) for storage.
+ To check the storage architecture, we need to:
+ 1. Verify the StatefulSet and its pods.
+ 2. Check the PVCs and PersistentVolumes (PVs) associated with each pod.
+ 3. Verify the storage class and its configuration.
+ Let's break it down step by step.
+
+Check Persistent Volume Claims (PVCs)
+```bash
+kubectl get pvc --selector app=web-mongodb
+kubectl get pv
+```
+
+Verify StorageClass configuration
+```bash
+kubectl describe storageclass nfs-sc
+```
+Check Actual Storage on NFS Server
+```bash
+ls -l /mnt/sdb2-partition/mongo-NFS-server
+```
+Test data persistence by deleting a pod and checking data retention:
+```bash
+
+kubectl exec web-mongodb-0 -- mongosh --eval "
+  use testdb;
+  db.testcoll.insertOne({message: 'Storage Test'});"
+
+kubectl delete pod web-mongodb-0
+
+kubectl exec web-mongodb-0 -- mongosh --eval "
+  use testdb;
+  db.testcoll.find().pretty()"
+```
+
+Check Storage in Pods.
+Inspect mounted volumes in a MongoDB pod:
+```bash
+kubectl exec web-mongodb-0 -- df -h /data/db
+```
+Verify Replica Set Storage Status. Check if all replicas are using their own storage:
+```bash
+kubectl exec web-mongodb-0 -- mongosh --quiet --eval "
+  rs.status().members.forEach(m => {
+    print(m.name + ': ' + m.stateStr + ' | Size: ' + m.optime.ts);
+  })"
+```
+
+ 
+
 
 Required Files Summary
 nfs-rbac.yml - RBAC permissions
