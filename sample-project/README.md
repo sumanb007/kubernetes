@@ -1278,8 +1278,41 @@ We are replacing the Deployment with a StatefulSet (sts).
         - --replSet
         - rs0
       ```
+ 5. To avoid MongoDB driver occur issues with the replica set configuration for the connection, let's add the connection string to use the headless service (which will load balance the connections to the MongoDB pods) and let the MongoDB driver discover the replica set members.
+
+    We'll use .containers.env. :
+    `mongodb://web-mongodb-headless:27017/?replicaSet=rs0&readPreference=primaryPreferred`
+
+    ```yaml
+    env:
+    - name: MONGO_URL
+      value: "mongodb://web-mongodb-0.web-mongodb-headless,web-mongodb-1.web-mongodb-headless,web-mongodb-2.web-mongodb-headless:27017/replicaSet=rs0&readPreference=primaryPreferred"
+    ```
+    This way, the driver will use the headless service to get the list of pods and then connect to them individually.
+
+ 6. We had one issue while deploying the mongo ########
+
+#
+##
+#
+#
+
+
+    .containers.readinessProbe
+    ```yaml
+    # In mongodb-sts.yml
+    readinessProbe:
+      exec:
+        command:
+        - mongo
+        - --eval
+        - "db.adminCommand('ping')"
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      failureThreshold: 3
+    ```
      
- 5. And we add headless service in the manifest.
+ 8. And we add headless service in the manifest.
     ```yaml  
     apiVersion: v1
     kind: Service
