@@ -977,7 +977,11 @@ spec:
       port: 27017
 ```
 
-## 5.3. Scaling Mongo As Statefulset 
+## 5.3. Scaling Mongo As Statefulset
+
+The key difference is that the StatefulSet is designed for distributed databases and requires replica set configuration for multiple instances, while the Deployment uses a single MongoDB instance without replica set.
+
+Given the complexity and the fact that the application works with a single MongoDB instance, we might consider sticking with the Deployment for simplicity. However, if we require high availability and data redundancy, we need to get the StatefulSet working.
 
 **Our goal:** Scale MongoDB seamlessly without manually creating PersistentVolumes (PVs) for each replica, while ensuring data consistency and reliable storage.
 
@@ -1290,12 +1294,7 @@ We are replacing the Deployment with a StatefulSet (sts).
     ```
     This way, the driver will use the headless service to get the list of pods and then connect to them individually.
 
- 6. We had one issue while deploying the mongo ########
-
-#
-##
-#
-#
+ 6. We also add a readiness probe to the MongoDB StatefulSet to ensure that Kubernetes only directs traffic to the MongoDB pod after the replica set is fully initialized and ready to accept connections. This prevents applications from connecting to MongoDB before it's operational, eliminating timeout errors during startup or reboots.
 
 
     .containers.readinessProbe
@@ -1312,7 +1311,7 @@ We are replacing the Deployment with a StatefulSet (sts).
       failureThreshold: 3
     ```
      
- 8. And we add headless service in the manifest.
+ 7. Then, we add headless service in the manifest.
     ```yaml  
     apiVersion: v1
     kind: Service
