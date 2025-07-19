@@ -1251,11 +1251,20 @@ This field shows the PVC that the PV is bound to in the format: namespace/pvc-na
 We are replacing the Deployment with a StatefulSet (sts). 
 
  Important changes for StatefulSet:
- 1. We use `serviceName` under sts.spec. to specify the headless service that controls the network domain.
+ 1. We start with 3 replicas for redundancy, `replicas: 3`
+ 2. We use `serviceName` under sts.spec. to specify the headless service that controls the network domain.
     `serviceName: web-mongodb-headless`
     
- 2. Each pod in a StatefulSet gets a stable hostname based on the StatefulSet name and the ordinal index (e.g., web-mongodb-0).
- 3. We use `volumeClaimTemplates` under sts.spec. for persistent storage. This will dynamically create a PVC for each pod.
+    Each pod in a StatefulSet gets a stable hostname based on the StatefulSet name and the ordinal index (e.g., web-mongodb-0).
+ 3. Configure MongoDB to start as a replica set by passing the `--replSet` flag under .containers.command
+     ```yaml
+      command:  
+        - mongod
+        - --bind_ip_all
+        - --replSet
+        - rs0
+      ```
+ 4. We use `volumeClaimTemplates` under sts.spec. for persistent storage. This will dynamically create a PVC for each pod.
       ```yaml
       volumeClaimTemplates:
       - metadata:
@@ -1267,32 +1276,12 @@ We are replacing the Deployment with a StatefulSet (sts).
             requests:
               storage: 1Gi
       ```
- 4. Remove the static PVC volumes
+ 5. Remove the static PVC volumes
       ```yaml
       - name: mongo-storage
         persistentVolumeClaim:
           claimName: mongodb-data
       ```
-      
- 4. Configure MongoDB to start as a replica set by passing the `--replSet` flag under .containers.command
-     ```yaml
-      command:  
-        - mongod
-        - --bind_ip_all
-        - --replSet
-        - rs0
-      ```
- 5. To avoid MongoDB driver occur issues with the replica set configuration for the connection, let's add the connection string to use the headless service (which will load balance the connections to the MongoDB pods) and let the MongoDB driver discover the replica set members.
-
-    We'll use .containers.env. :
-    `mongodb://web-mongodb-headless:27017/?replicaSet=rs0&readPreference=primaryPreferred`
-
-    ```yaml
-    env:
-    - name: MONGO_URL
-      value: "mongodb://web-mongodb-0.web-mongodb-headless,web-mongodb-1.web-mongodb-headless,web-mongodb-2.web-mongodb-headless:27017/replicaSet=rs0&readPreference=primaryPreferred"
-    ```
-    This way, the driver will use the headless service to get the list of pods and then connect to them individually.
 
  6. We also add a readiness probe to the MongoDB StatefulSet to ensure that Kubernetes only directs traffic to the MongoDB pod after the replica set is fully initialized and ready to accept connections. This prevents applications from connecting to MongoDB before it's operational, eliminating timeout errors during startup or reboots.
 
@@ -1332,6 +1321,19 @@ We are replacing the Deployment with a StatefulSet (sts).
     - Elect a primary (the leader pod)
     - Keep all data in sync between members
 
+**Before applying changes in mongoDB sts:***  To avoid MongoDB driver occur issues with the replica set configuration for the connection, let's add the connection string 'backend deploy' to use the headless service (which will load balance the connections to the MongoDB pods) and let the MongoDB driver discover the replica set members.
+
+   In `backend-deploy.yml` .containers.env. we add :
+   `mongodb://web-mongodb-headless:27017/?replicaSet=rs0&readPreference=primaryPreferred`
+
+   ```yaml
+   env:
+   - name: MONGO_URL
+     value: "mongodb://web-mongodb-0.web-mongodb-headless,web-mongodb-1.web-mongodb-headless,web-mongodb-2.web-mongodb-headless:27017/replicaSet=rs0&readPreference=primaryPreferred"
+   ```
+   This way, the driver will use the headless service to get the list of pods and then connect to them individually.
+
+    
 Now, We save the changes to `mongodb-sts.yml` and apply it
 
 ```bash
@@ -1517,6 +1519,10 @@ kubectl exec web-mongodb-0 -- mongosh --quiet --eval "
   })"
 ```
 
+Test if the application works when whole cluster is rebooted. Since we have deployed cluster as VM in a host, we will try rebooting the host itself.
+```bash
+HOST rebooted
+```
  
 
 
