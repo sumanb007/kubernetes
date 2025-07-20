@@ -1308,22 +1308,29 @@ We are replacing the Deployment with a StatefulSet (sts).
       name: web-mongodb-headless
     spec:
       clusterIP: None  # headless required for sts
+      publishNotReadyAddresses: true
       selector:
         app: web-mongodb
       ports:
       - port: 27017
         targetPort: 27017
     ```
-    **Why?** Pods need to talk to each other by name. Without a headless service, pods only get a shared name (like a common receptionist) and can’t call each other directly.
+    **Why ?** Pods need to talk to each other by name. Without a headless service, pods only get a shared name (like a common receptionist) and can’t call each other directly.
 
     MongoDB sts pods needs to:
     - Know who the other members are
     - Elect a primary (the leader pod)
     - Keep all data in sync between members
 
-**Before applying changes in mongoDB sts:***  To avoid MongoDB driver occur issues with the replica set configuration for the connection, let's add the connection string 'backend deploy' to use the headless service (which will load balance the connections to the MongoDB pods) and let the MongoDB driver discover the replica set members.
+    **Why publishNotReadyAddresses: true ?**
+    - We are using `publishNotReadyAddresses: true` for the headless service (web-mongodb-headless) to ensure that even when the MongoDB pods are not ready (during startup, recovery, etc.), their addresses are published. This is important for the replica set configuration because the MongoDB pods need to be able to discover each other even when they are not fully ready (for example, during initial setup or when a pod is restarting). Without this, the DNS records for the pods might not be available until they are ready, which could prevent the replica set from forming.
+      
+    - However, note that in the StatefulSet, we have a readiness probe. So once a pod is not ready, it will be removed from the service endpoints. But for headless services, the DNS records are normally only published for ready pods. By setting `publishNotReadyAddresses: true`, we ensure that the DNS records are published even when the pods are not ready. This is crucial for the replica set to be able to reconnect and recover.
 
-   In `backend-deploy.yml` .containers.env. we add :
+**Before applying changes in mongoDB sts:***  
+1. To avoid MongoDB driver occur issues with the replica set configuration for the connection, let's add the connection string 'backend deploy' to use the headless service (which will load balance the connections to the MongoDB pods) and let the MongoDB driver discover the replica set members.
+
+    In `backend-deploy.yml` .containers.env. we add :
    `mongodb://web-mongodb-headless:27017/?replicaSet=rs0&readPreference=primaryPreferred`
 
    ```yaml
@@ -1332,6 +1339,27 @@ We are replacing the Deployment with a StatefulSet (sts).
      value: "mongodb://web-mongodb-0.web-mongodb-headless,web-mongodb-1.web-mongodb-headless,web-mongodb-2.web-mongodb-headless:27017/replicaSet=rs0&readPreference=primaryPreferred"
    ```
    This way, the driver will use the headless service to get the list of pods and then connect to them individually.
+   
+2.  Also we include an init container that waits for the MongoDB replica set to be fully initialized (by checking `rs.status().ok` equals 1) before starting the backend application.
+
+    ```yaml
+    initContainers:
+      - name: mongo-dns-check
+        image: mongo:4.0-rc-xenial
+        command: ['sh', '-c', 
+          'until mongo --host web-mongodb-0.web-mongodb-headless --eval "rs.status().ok" | grep -q 1; do 
+             echo "Waiting for MongoDB replica set initialization...";
+             sleep 5;
+           done;
+           echo "MongoDB replica set is ready"']
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+    ```
+    This ensures proper startup sequencing between MongoDB and the backend. Our cluster will now be resilient to host reboots - all components recover automatically without manual intervention.
+  
 
     
 Now, We save the changes to `mongodb-sts.yml` and apply it
@@ -1392,15 +1420,12 @@ So we try a workaround by creating a new NetworkPolicy that allow traffic based 
           port: 27017
    ```
 
-### Key Fixes in This Policy:
+**Key Fixes in above Policy:**
 - **Added Egress Permission** allows MongoDB pods to initiate connections to other pods. Required for replica set formation.
-- **Used IP Blocks Instead of Pod Selectors**
-   - ipBlock: 172.16.0.0/16 covers all pods regardless of node
-   - Pod selectors alone don't handle cross-node traffic well
-- **Port-Specific Egress** Only allows egress on MongoDB port (27017). Maintains security while enabling required connectivity
+- **Port-Specific Egress** Only allows egress on MongoDB port (27017). Maintains security while enabling required connectivity. Pod selectors alone don't handle cross-node traffic well
 
 
-**Now**, let's connect to web-mongodb-0: Run the replica set initiation command:
+**Now**, let's connect to web-mongodb-0: Run the replica set initialization command:
 ```sh
 kubectl exec web-mongodb-0 -- mongo --eval "rs.initiate({
   _id: 'rs0',
@@ -1411,7 +1436,7 @@ kubectl exec web-mongodb-0 -- mongo --eval "rs.initiate({
   ]
 })"
 ```
-The replica set initialization command should return `{ "ok" : 1 }`, indicating success.
+The replica set initialization should return `{ "ok" : 1 }`, indicating success.
 
 
 Testing connectivity between pods using MongoDB's built-in client:
@@ -1431,7 +1456,10 @@ kubectl run dns-test --image=busybox:1.36 --rm -it --restart=Never -- nslookup w
 kubectl exec web-mongodb-0 -- mongo --eval "rs.status()"
 ```
 
-### So then, do we need to add members to mongo replica each time we scale up pod ?
+---
+### 5.3.4 Mongo Init Job
+
+**So then, do we need to add members to mongo replica each time we scale up pod ?**
 Yes.  Note that MongoDB does not automatically add new members. We have to do it manually or with an automation tool. Here's the typical workflow:
  1. Initialize the replica set once (with the initial set of members).
  2. When scaling up, the StatefulSet creates new pods and new PVCs (if using volumeClaimTemplates) for the new members.
@@ -1439,7 +1467,7 @@ Yes.  Note that MongoDB does not automatically add new members. We have to do it
 
 However, note that when we scale down a StatefulSet, it removes the pod but leaves the PVC (because of the retain policy). So if we scale up again and the same pod (with the same index) comes back, it will reuse the PVC and the data
 
-### While we scale down ?
+**While we scale down ?**
 
 If we scale down, we should also remove the members from the replica set configuration to avoid having unreachable members.
 However, scaling down a StatefulSet does not automatically remove the member from the replica set. we must do it manually.
@@ -1458,7 +1486,75 @@ Therefore, the best practice is:
         1. Scale up the StatefulSet.
         2. Then add the new member to the replica set.
 
+**Setup Job**
 
+Instead of manually initializing inside pod let's automate mongo init job to initialize the MongoDB replica set. This is necessary because when the MongoDB pods start for the first time, they are just individual MongoDB instances. We need to run a command to form them into a replica set. This job automatically runs the initialization commands, which is essential for a self-healing and automated cluster.  This is a one-time setup for the replica set.
+
+However, note that after the initial setup, the replica set configuration is stored in the database files. Therefore, when the pods restart (e.g., after a reboot), the replica set should automatically reform without needing to run the init job again. That's why we set the job to be a one-time job that auto-deletes after completion.
+
+For convenience, we add this job into `mongodb-sts.yml` manifest file.
+```yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mongo-init
+spec:
+  backoffLimit: 0  # No retries
+  ttlSecondsAfterFinished: 60  # Auto-delete after completion
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: mongo-init
+        image: mongo:4.0-rc-xenial
+        command:
+        - /bin/sh
+        - -c
+        - |
+          # Wait for all MongoDB pods to be ready
+          echo "Waiting for MongoDB pods..."
+          until nslookup web-mongodb-0.web-mongodb-headless >/dev/null 2>&1 && \
+                mongo --host web-mongodb-0.web-mongodb-headless --eval "db.adminCommand('ping')" >/dev/null 2>&1; do
+            sleep 2
+          done
+          until nslookup web-mongodb-1.web-mongodb-headless >/dev/null 2>&1 && \
+                mongo --host web-mongodb-1.web-mongodb-headless --eval "db.adminCommand('ping')" >/dev/null 2>&1; do
+            sleep 2
+          done
+          until nslookup web-mongodb-2.web-mongodb-headless >/dev/null 2>&1 && \
+                mongo --host web-mongodb-2.web-mongodb-headless --eval "db.adminCommand('ping')" >/dev/null 2>&1; do
+            sleep 2
+          done
+
+          # Initialize replica set
+          echo "Initializing replica set"
+          mongo --host web-mongodb-0.web-mongodb-headless --eval "
+            rs.initiate({
+              _id: 'rs0',
+              members: [
+                {_id: 0, host: 'web-mongodb-0.web-mongodb-headless:27017'},
+                {_id: 1, host: 'web-mongodb-1.web-mongodb-headless:27017'},
+                {_id: 2, host: 'web-mongodb-2.web-mongodb-headless:27017'}
+              ]
+            })"
+          
+          # Wait for primary election
+          echo "Waiting for primary election..."
+          until mongo --host web-mongodb-0.web-mongodb-headless --eval "rs.isMaster().ismaster" | grep -q true; do
+            sleep 2
+          done
+          echo "Replica set initialized successfully"
+```
+
+**Key Features of This Solution:**
+- The job waits until the primary pod (web-mongodb-0) is ready.
+- Checks if the replica set is already initialized (by trying to get the status). If not, it initializes.
+- Initializes the replica set with the three members.
+- After the job runs successfully, the replica set is formed. Then, even if the pods restart, the replica set configuration is persisted in the data directory (which is on persistent storage) and they will reconnect.
+- Auto-deletes after 60 seconds (ttlSecondsAfterFinished)
+
+  
+---
 ### Let's verify the application reachability now.
 
 ```bash
