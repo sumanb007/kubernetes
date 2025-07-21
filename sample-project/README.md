@@ -1585,6 +1585,9 @@ rules:
 - apiGroups: ["apps"]
   resources: ["statefulsets"]
   verbs: ["get", "list"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -1608,72 +1611,76 @@ metadata:
   name: mongo-scale
 spec:
   backoffLimit: 0
-  ttlSecondsAfterFinished: 60
+  ttlSecondsAfterFinished: 600
   template:
     spec:
       serviceAccountName: mongo-scale-sa
       restartPolicy: OnFailure
       containers:
       - name: mongo-scale
-        image: bitnami/kubectl:1.29
+        image: mongo:4.0.28
         command:
-        - /bin/sh
+        - /bin/bash
         - -c
         - |
-          # Install MongoDB shell
-          apk add --no-cache mongodb
-
-          # Get current replica set size
-          current_replicas=$(kubectl get sts web-mongodb -o jsonpath='{.spec.replicas}')
-          echo "Current StatefulSet replicas: $current_replicas"
+          # Install kubectl
+          apt-get update && apt-get install -y curl
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl && mv kubectl /usr/local/bin/
           
-          # Get primary pod
-          primary=$(mongo --host web-mongodb-0 --eval "rs.isMaster().primary" --quiet | cut -d ':' -f1)
+          # Use headless service domain for connections
+          until mongo --host web-mongodb-0.web-mongodb-headless --eval "db.adminCommand('ping')" >/dev/null; do
+            echo "Waiting for MongoDB to be ready..."
+            sleep 5
+          done
+          
+          primary=$(mongo --host web-mongodb-0.web-mongodb-headless --eval "rs.isMaster().primary" --quiet | cut -d ":" -f1)
           echo "Primary MongoDB pod: $primary"
           
           # Get current member count
           member_count=$(mongo --host $primary --eval "rs.status().members.length" --quiet)
           echo "Current replica set members: $member_count"
           
+          # Get current replica set size
+          current_replicas=$(kubectl get sts web-mongodb -o jsonpath="{.spec.replicas}")
+          echo "Current StatefulSet replicas: $current_replicas"
+          
           # Add new members
           if [ $current_replicas -gt $member_count ]; then
             echo "Scaling UP: Adding $((current_replicas - member_count)) new members"
-            for i in $(seq $member_count $((current_replicas-1))); do
-              echo "Adding member web-mongodb-$i.web-mongodb-headless:27017"
-              mongo --host $primary --eval "rs.add({
-                _id: $i,
-                host: 'web-mongodb-$i.web-mongodb-headless:27017',
-                priority: 0,
-                votes: 0
-              })"
-              
-              # Wait for member to initialize
-              until mongo --host web-mongodb-$i --eval "db.adminCommand('ping')" >/dev/null; do
-                echo "Waiting for web-mongodb-$i to be ready..."
-                sleep 5
-              done
+            
+            # Get list of all pod names
+            pods=$(kubectl get pods -l app=web-mongodb -o jsonpath="{.items[*].metadata.name}" | sort -V)
+            
+            for pod in $pods; do
+              # Check if member already exists
+              if ! mongo --host $primary --eval "rs.status().members.some(m => m.name === \"$pod.web-mongodb-headless:27017\")" --quiet | grep -q true; then
+                echo "Adding member $pod.web-mongodb-headless:27017"
+                mongo --host $primary --eval "rs.add({
+                  host: \"$pod.web-mongodb-headless:27017\",
+                  priority: 0,
+                  votes: 0
+                })"
+                
+                # Wait for member to initialize
+                until mongo --host $pod.web-mongodb-headless --eval "db.adminCommand(\"ping\")" >/dev/null; do
+                  echo "Waiting for $pod to be ready..."
+                  sleep 5
+                done
+              fi
             done
             
-            # Reconfigure voting members (max 7 voting members)
+            # Reconfigure voting members
             echo "Reconfiguring voting members"
-            mongo --host $primary --eval "rs.reconfig({
-              _id: 'rs0',
-              version: rs.conf().version + 1,
-              members: rs.status().members.map((m, idx) => ({
-                ...m,
-                priority: idx < 7 ? 1 : 0,
-                votes: idx < 7 ? 1 : 0
-              }))
-            }, {force: true})"
-          fi
-          
-          # Remove extra members (if scaling down)
-          if [ $current_replicas -lt $member_count ]; then
-            echo "Scaling DOWN: Removing $((member_count - current_replicas)) members"
-            for i in $(seq $current_replicas $((member_count-1))); do
-              echo "Removing member web-mongodb-$i.web-mongodb-headless:27017"
-              mongo --host $primary --eval "rs.remove('web-mongodb-$i.web-mongodb-headless:27017')"
-            done
+            mongo --host $primary --eval "
+              var conf = rs.conf();
+              conf.version++;
+              conf.members.forEach((m, idx) => {
+                m.priority = idx < 7 ? 1 : 0;
+                m.votes = idx < 7 ? 1 : 0;
+              });
+              rs.reconfig(conf, {force: true});
+            "
           fi
           
           echo "Replica set scaling complete"
