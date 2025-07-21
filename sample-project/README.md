@@ -1669,8 +1669,33 @@ spec:
                 done
               fi
             done
+          fi
+          
+          # Remove extra members (scaling down)
+          if [ $current_replicas -lt $member_count ]; then
+            echo "Scaling DOWN: Removing $((member_count - current_replicas)) members"
             
-            # Reconfigure voting members
+            # Get list of all current pod names
+            current_pods=$(kubectl get pods -l app=web-mongodb -o jsonpath='{.items[*].metadata.name}' | sort -V)
+            
+            # Get replica set members
+            members=$(mongo --host $primary --eval "rs.status().members.map(m => m.name)" --quiet | sed 's/"//g' | tr -d '[]' | tr ',' '\n' | sed 's/^ *//; s/ *$//')
+            
+            # Remove members for pods that no longer exist
+            for member in $members; do
+              # Extract pod name from member string (web-mongodb-0.web-mongodb-headless:27017 → web-mongodb-0)
+              pod_name=${member%%.*}
+              
+              # Check if pod still exists
+              if ! echo "$current_pods" | grep -wq "$pod_name"; then
+                echo "Removing member $member"
+                mongo --host $primary --eval "rs.remove('$member')"
+              fi
+            done
+          fi
+          
+          # Reconfigure voting members if needed
+          if [ $current_replicas -ne $member_count ]; then
             echo "Reconfiguring voting members"
             mongo --host $primary --eval "
               var conf = rs.conf();
