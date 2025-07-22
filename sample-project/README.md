@@ -1454,12 +1454,59 @@ kubectl run dns-test --image=busybox:1.36 --rm -it --restart=Never -- nslookup w
 **Which Pod is Primary ?** check for "stateStr" : "PRIMARY"
 ```bash
 kubectl exec web-mongodb-0 -- mongo --eval "rs.status()"
+kubectl exec web-mongodb-0 -- mongo --eval "rs.status().members.forEach(m => print(m.name + ' - ' + m.stateStr))"
 ```
+
+**To Scale Up :**
+
+We scale up the pod replicas and then add members to mongo replicaset.
+
+Example(Scale from replicas:3 to 5:
+```bash
+kubectl scale sts web-mongodb --replicas=5
+
+kubectl exec web-mongodb-0 -- mongo --eval "
+rs.add('web-mongodb-3.web-mongodb-headless:27017');
+rs.add('web-mongodb-4.web-mongodb-headless:27017');
+"
+```
+
+**To Scale Down :**
+
+We first remove the mongo members and then we scale the pods down.
+
+Example(Scale from replicas:5 to 3)
+```bash
+kubectl exec web-mongodb-0 -- mongo --eval "
+rs.remove('web-mongodb-3.web-mongodb-headless:27017');
+rs.remove('web-mongodb-4.web-mongodb-headless:27017');
+"
+
+kubectl scale sts web-mongodb --replicas=3
+```
+
+**If issue assiging members :**
+
+```bash
+kubectl exec web-mongodb-0 -- mongo --eval "
+var conf = rs.conf();
+conf.members = [
+    {_id: 0, host: 'web-mongodb-0.web-mongodb-headless:27017'},
+    {_id: 1, host: 'web-mongodb-1.web-mongodb-headless:27017'},
+    {_id: 2, host: 'web-mongodb-2.web-mongodb-headless:27017'}
+];
+conf.version++;
+rs.reconfig(conf, {force: true});
+"
+```
+This forcibly overwrites the current replica set configuration with exactly the 3 members listed, removing any extra members that may have been there before (e.g., web-mongodb-3, web-mongodb-4, etc.).
+
 
 ---
 ### 5.3.4 Mongo init and scale Jobs
 
 **So then, do we need to add members to mongo replica each time we scale up pod ?**
+
 Yes.  Note that MongoDB does not automatically add new members. We have to do it manually or with an automation tool. Here's the typical workflow:
  1. Initialize the replica set once (with the initial set of members).
  2. When scaling up, the StatefulSet creates new pods and new PVCs (if using volumeClaimTemplates) for the new members.
@@ -1701,8 +1748,8 @@ spec:
               var conf = rs.conf();
               conf.version++;
               conf.members.forEach((m, idx) => {
-                m.priority = idx < 7 ? 1 : 0;
-                m.votes = idx < 7 ? 1 : 0;
+                m.priority = idx < 7 ? 1 : 0;  // First 7 are eligible to be primary
+                m.votes = idx < 7 ? 1 : 0;     // First 7 get voting rights
               });
               rs.reconfig(conf, {force: true});
             "
@@ -1710,6 +1757,18 @@ spec:
           
           echo "Replica set scaling complete"
 ```
+What does this voting members do?
+1. **Retrieves the current replica set configuration**: `rs.conf()`.
+2. **Increments the configuration version**: This is required when making changes to the replica set configuration.
+3. **Iterates over each member**:
+   - For members with index (`idx`) less than 7, sets `priority` to 1 and `votes` to 1.
+   - For members with index 7 or higher, sets `priority` to 0 and `votes` to 0.
+4. **Reconfigures the replica set** with the updated configuration, using `{force: true}` to force the reconfiguration even if a majority of members are not available.asd
+
+Why is this done?
+- MongoDB replica sets have a limit of 7 voting members. Only 7 members can vote in an election for primary. 
+- When scaling beyond 7 nodes, additional members must be non-voting (i.e., `votes: 0`) and typically have `priority: 0` (so they cannot become primary).
+- This script enforces that the first 7 members (by their index in the configuration array) are voting members, and any additional members are non-voting.
 
 ---
 ### Let's verify the application reachability now.
