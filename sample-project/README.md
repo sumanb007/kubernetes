@@ -1485,8 +1485,9 @@ rs.remove('web-mongodb-4.web-mongodb-headless:27017');
 kubectl scale sts web-mongodb --replicas=3
 ```
 
-**If issue assiging members :**
+**If issue electing members :** 
 
+Example: '(not reachable/healthy)' instead of electing PRIMARY or SECONDARY,
 ```bash
 kubectl exec web-mongodb-0 -- mongo --eval "
 var conf = rs.conf();
