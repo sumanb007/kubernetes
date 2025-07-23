@@ -284,6 +284,7 @@ metadata:
 
 Apply it: `kubectl apply -f metallb-config.yml`
 
+---
 ### 3.2. Nginx-ingress controller and Ingress resource.
 
 We can use the manifest from the official project:
@@ -334,7 +335,7 @@ spec:
             port:
               number: 5000
 ```
-
+---
 ### 3.3. TLS for Secure HTTPS Access
 
 For real-world scenario, let's replace self-signed certificate with below options:
@@ -640,7 +641,7 @@ Before proceeding, let's deploy metrics then we find out how much of the minimun
    kubectl rollout restart deploy/web-mongodb
    kubectl get pod web-mongodb-76c57d566d-mtp6l -o yaml | grep -A6 "resources:"
    ```
-
+---
 ### 5.2. Implementing Horizontal Pod Autoscaler (HPA)
 
 - Let's use HPA for scaling efficiency. We will scale frontend and backned pods when the usage is 70% of the requested resources.
@@ -712,6 +713,7 @@ Here, we will enforce below for Security:
 - Limit syscalls using `seccompProfile`
 - Limit pod communication using `Network Policy`
 
+---
 ### 6.1. Using securityContext
 
 We first structure into two levels:
@@ -855,7 +857,7 @@ Let's address each service:
    ```
 
    
-
+---
 ### 6.2. Using Network Policy
 
 By default, if no policies are defined, all pods can communicate with each other. This is a security risk because if one pod is compromised, an attacker can easily access other pods.
@@ -976,7 +978,7 @@ spec:
     - protocol: TCP
       port: 27017
 ```
-
+---
 ## 5.3. Scaling Mongo As Statefulset
 
 The key difference is that the StatefulSet is designed for distributed databases and requires replica set configuration for multiple instances, while the Deployment uses a single MongoDB instance without replica set.
@@ -1035,7 +1037,7 @@ We will design our goal in Steps:
  5. Update the MongoDB image to a stable version (avoiding release candidates) and configure the replica set.
  6. Use a headless service for StatefulSet.
 
-
+---
 ### 5.3.1 Install NFS Provisioner
 
 - First, we allows egress from all pods in the default namespace to the master node's IP (192.168.1.11) on port 6443. Why ? Because we have blocked the all default traffic in above network policies. 
@@ -1193,7 +1195,7 @@ The StatefulSet ensures that each pod gets a stable network identity and stable 
   - TLS handshake is successful.
   - API server is responding.
 
-
+---
 ### 5.3.2 StorageClass and PVC Provisioning
 
 **StorageClass**
@@ -1457,6 +1459,34 @@ kubectl exec web-mongodb-0 -- mongo --eval "rs.status()"
 kubectl exec web-mongodb-0 -- mongo --eval "rs.status().members.forEach(m => print(m.name + ' - ' + m.stateStr))"
 ```
 
+**So then, do we need to add members to mongo replica each time we scale up pod ?**
+
+Yes.  Note that MongoDB does not automatically add new members. We have to do it manually or with an automation tool. Here's the typical workflow:
+ 1. Initialize the replica set once (with the initial set of members).
+ 2. When scaling up, the StatefulSet creates new pods and new PVCs (if using volumeClaimTemplates) for the new members.
+ 3. Then, we must add the new members to the replica set configuration using `rs.add()`.
+
+However, note that when we scale down a StatefulSet, it removes the pod but leaves the PVC (because of the retain policy). So if we scale up again and the same pod (with the same index) comes back, it will reuse the PVC and the data
+
+**While we scale down ?**
+
+If we scale down, we should also remove the members from the replica set configuration to avoid having unreachable members.
+However, scaling down a StatefulSet does not automatically remove the member from the replica set. we must do it manually.
+
+```bash
+rs.remove("web-mongodb-3.web-mongodb-headless:27017")  # Remove members
+```
+
+Scaling down the StatefulSet without removing the member from the replica set can cause issues because the replica set will keep trying to contact the removed pod.
+
+Therefore, the best practice is:
+   - To scale down: 
+        1. Remove the member from the replica set (using `rs.remove()` on the primary).
+        2. Then scale down the StatefulSet.
+   - To scale up:
+        1. Scale up the StatefulSet.
+        2. Then add the new member to the replica set.
+
 **To Scale Up :**
 
 We scale up the pod replicas and then add members to mongo replicaset.
@@ -1500,39 +1530,11 @@ conf.version++;
 rs.reconfig(conf, {force: true});
 "
 ```
-This forcibly overwrites the current replica set configuration with exactly the 3 members listed, removing any extra members that may have been there before (e.g., web-mongodb-3, web-mongodb-4, etc.).
+This forcibly overwrites the current replica set configuration with exactly the 3 members listed and elects PRIMARY/SECONDARY, removing any extra members that may have been there before (e.g., web-mongodb-3, web-mongodb-4, etc.).
 
 
 ---
-### 5.3.4 Mongo init and scale Jobs
-
-**So then, do we need to add members to mongo replica each time we scale up pod ?**
-
-Yes.  Note that MongoDB does not automatically add new members. We have to do it manually or with an automation tool. Here's the typical workflow:
- 1. Initialize the replica set once (with the initial set of members).
- 2. When scaling up, the StatefulSet creates new pods and new PVCs (if using volumeClaimTemplates) for the new members.
- 3. Then, we must add the new members to the replica set configuration using `rs.add()`.
-
-However, note that when we scale down a StatefulSet, it removes the pod but leaves the PVC (because of the retain policy). So if we scale up again and the same pod (with the same index) comes back, it will reuse the PVC and the data
-
-**While we scale down ?**
-
-If we scale down, we should also remove the members from the replica set configuration to avoid having unreachable members.
-However, scaling down a StatefulSet does not automatically remove the member from the replica set. we must do it manually.
-
-```bash
-rs.remove("web-mongodb-3.web-mongodb-headless:27017")  # Remove members
-```
-
-Scaling down the StatefulSet without removing the member from the replica set can cause issues because the replica set will keep trying to contact the removed pod.
-
-Therefore, the best practice is:
-   - To scale down: 
-        1. Remove the member from the replica set (using `rs.remove()` on the primary).
-        2. Then scale down the StatefulSet.
-   - To scale up:
-        1. Scale up the StatefulSet.
-        2. Then add the new member to the replica set.
+### 5.3.4 ConfigMaps & Scripting Mongo init/scale Jobs
 
 ### Init Job
 
@@ -1540,12 +1542,12 @@ Instead of manually initializing inside pod let's automate mongo init job to ini
 
 However, note that after the initial setup, the replica set configuration is stored in the database files. Therefore, when the pods restart (e.g., after a reboot), the replica set should automatically reform without needing to run the init job again. That's why we set the job to be a one-time job that auto-deletes after completion.
 
-For convenience, we add this job into `mongodb-sts.yml` manifest file.
+For convenience, we add this job into our `mongodb-sts.yml` manifest file.
 ```yaml
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: mongo-init
+  name: mongo-init-job
 spec:
   backoffLimit: 0  # No retries
   ttlSecondsAfterFinished: 60  # Auto-delete after completion
@@ -1603,13 +1605,157 @@ spec:
 
 ### Scale Job
 
-We need to run the scaling job after every scaling operation (both scale up and scale down) to adjust the replica set members.
+Also we script the scaling job for every pod scaling operation (both scale up and scale down) to adjust the replica set members.
 
 **Script idea:**
+- download and install kubectl so the container can interact with the Kubernetes API (to fetch StatefulSet/pod info).
+- connect to each pod (web-mongodb-0 to web-mongodb-6) via MongoDB to find the current primary node for initiating further replica set commands.
 - current_replicas = current StatefulSet replica count (from kubectl)
 - member_count = current number of members in the replica set (from rs.status())
 - If current_replicas > member_count, it adds the new members.
 - Else if current_replicas < member_count, it removes the new members and then removes replicas.
+- First 7 members get votes = 1 and priority = 1 (max allowed by MongoDB). Others get votes = 0, priority = 0 for election.
+
+   Let's write script file `scale-mongo.sh` and create configMap `mongo-scale-script-cm` to loosely couple the process. And then we run as a Job `
+    ```bash
+    #!/bin/bash
+    
+    # Install kubectl
+    apt-get update && apt-get install -y curl
+    curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+    chmod +x kubectl && mv kubectl /usr/local/bin/
+    
+    # Find primary node
+    primary=""
+    for i in {0..6}; do
+      echo "Checking web-mongodb-$i for primary status..."
+      if mongo --host "web-mongodb-$i.web-mongodb-headless" --eval "db.adminCommand('ping')" &>/dev/null; then
+        primary_candidate=$(mongo --host "web-mongodb-$i.web-mongodb-headless" --quiet --eval "rs.isMaster().primary" | cut -d: -f1)
+        if [ -n "$primary_candidate" ]; then
+          primary="$primary_candidate"
+          echo "Found primary: $primary"
+          break
+        fi
+      fi
+    done
+    
+    # If no primary found, force reconfiguration with current pods
+    if [ -z "$primary" ]; then
+      echo "WARNING: No primary found - forcing reconfiguration with current pods"
+      
+      # Get current pods
+      current_pods=($(kubectl get pods -l app=web-mongodb -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | sort -V))
+      
+      # Build new member configuration
+      members_config=""
+      for idx in "${!current_pods[@]}"; do
+        members_config+="{_id:$idx, host:\"${current_pods[$idx]}.web-mongodb-headless:27017\"},"
+      done
+      members_config="${members_config%,}"
+      
+      # Force reconfig on first available pod
+      target_pod="${current_pods[0]}"
+      echo "Forcing new configuration with pods: ${current_pods[*]}"
+      
+      mongo --host "$target_pod.web-mongodb-headless" --eval "
+        var conf = {
+          _id: 'rs0',
+          protocolVersion: 1,  //REQUIRED FOR MONGODB 4.0+
+          version: 1,
+          members: [$members_config]
+        };
+        rs.reconfig(conf, {force: true});
+      "
+      
+      # Wait for primary election
+      echo "Waiting for primary election (this may take up to 60 seconds)..."
+      sleep 60 
+      for pod in "${current_pods[@]}"; do
+        if mongo --host "$pod.web-mongodb-headless" --quiet --eval "rs.isMaster().ismaster" | grep -q true; then
+          primary="$pod.web-mongodb-headless"
+          echo "New primary elected: $primary"
+          break
+        fi
+      done
+      
+      if [ -z "$primary" ]; then
+        echo "ERROR: Failed to elect primary after forced reconfiguration"
+        exit 1
+      fi
+    fi
+    
+    # Get current member count
+    member_count=$(mongo --host $primary --eval "rs.status().members.length" --quiet)
+    echo "Current replica set members: $member_count"
+    
+    # Get current replica set size
+    current_replicas=$(kubectl get sts web-mongodb -o jsonpath="{.spec.replicas}")
+    echo "Current StatefulSet replicas: $current_replicas"
+    
+    # Add new members
+    if [ $current_replicas -gt $member_count ]; then
+      echo "Scaling UP: Adding $((current_replicas - member_count)) new members"
+      
+      pods=$(kubectl get pods -l app=web-mongodb -o jsonpath="{.items[*].metadata.name}" | sort -V)
+      
+      for pod in $pods; do
+        if ! mongo --host $primary --eval "rs.status().members.some(m => m.name === \"$pod.web-mongodb-headless:27017\")" --quiet | grep -q true; then
+          echo "Adding member $pod.web-mongodb-headless:27017"
+          mongo --host $primary --eval "rs.add({
+            host: \"$pod.web-mongodb-headless:27017\",
+            priority: 0,
+            votes: 0
+          })"
+          
+          until mongo --host $pod.web-mongodb-headless --eval "db.adminCommand(\"ping\")" >/dev/null; do
+            echo "Waiting for $pod to be ready..."
+            sleep 5
+          done
+        fi
+      done
+    fi
+    
+    # Remove extra members (scaling down)
+    if [ $current_replicas -lt $member_count ]; then
+      echo "Scaling DOWN: Removing $((member_count - current_replicas)) members"
+      
+      current_pods=$(kubectl get pods -l app=web-mongodb -o jsonpath='{.items[*].metadata.name}' | sort -V)
+      members=$(mongo --host $primary --eval "rs.status().members.map(m => m.name)" --quiet | sed 's/"//g' | tr -d '[]' | tr ',' '\n' | sed 's/^ *//; s/ *$//')
+      
+      for member in $members; do
+        pod_name=${member%%.*}
+        
+        if ! echo "$current_pods" | grep -wq "$pod_name"; then
+          echo "Removing member $member"
+          mongo --host $primary --eval "rs.remove('$member')"
+        fi
+      done
+    fi
+    
+    # Reconfigure voting members
+    if [ $current_replicas -ne $member_count ]; then
+      echo "Reconfiguring voting members"
+      mongo --host $primary --eval "
+        var conf = rs.conf();
+        conf.version++;
+        conf.members.forEach((m, idx) => {
+          m.priority = idx < 7 ? 1 : 0;
+          m.votes = idx < 7 ? 1 : 0;
+        });
+        rs.reconfig(conf, {force: true});
+      "
+    fi
+    
+    echo "Replica set scaling complete"
+    ```
+
+### ConfigMap
+
+Now let's create ConfigMap for above script.
+
+```bash
+kubectl create cm mongo-scale-script-cm --from-file=scale-mongo.sh
+```
 
 **Before continuing:**
 
@@ -1656,7 +1802,7 @@ Then we compose job: `mongo-scale-job.yml`
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: mongo-scale
+  name: mongo-scale-job
 spec:
   backoffLimit: 0
   ttlSecondsAfterFinished: 600
@@ -1667,96 +1813,21 @@ spec:
       containers:
       - name: mongo-scale
         image: mongo:4.0.28
-        command:
-        - /bin/bash
-        - -c
-        - |
-          # Install kubectl
-          apt-get update && apt-get install -y curl
-          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-          chmod +x kubectl && mv kubectl /usr/local/bin/
-          
-          # Use headless service domain for connections
-          until mongo --host web-mongodb-0.web-mongodb-headless --eval "db.adminCommand('ping')" >/dev/null; do
-            echo "Waiting for MongoDB to be ready..."
-            sleep 5
-          done
-          
-          primary=$(mongo --host web-mongodb-0.web-mongodb-headless --eval "rs.isMaster().primary" --quiet | cut -d ":" -f1)
-          echo "Primary MongoDB pod: $primary"
-          
-          # Get current member count
-          member_count=$(mongo --host $primary --eval "rs.status().members.length" --quiet)
-          echo "Current replica set members: $member_count"
-          
-          # Get current replica set size
-          current_replicas=$(kubectl get sts web-mongodb -o jsonpath="{.spec.replicas}")
-          echo "Current StatefulSet replicas: $current_replicas"
-          
-          # Add new members
-          if [ $current_replicas -gt $member_count ]; then
-            echo "Scaling UP: Adding $((current_replicas - member_count)) new members"
-            
-            # Get list of all pod names
-            pods=$(kubectl get pods -l app=web-mongodb -o jsonpath="{.items[*].metadata.name}" | sort -V)
-            
-            for pod in $pods; do
-              # Check if member already exists
-              if ! mongo --host $primary --eval "rs.status().members.some(m => m.name === \"$pod.web-mongodb-headless:27017\")" --quiet | grep -q true; then
-                echo "Adding member $pod.web-mongodb-headless:27017"
-                mongo --host $primary --eval "rs.add({
-                  host: \"$pod.web-mongodb-headless:27017\",
-                  priority: 0,
-                  votes: 0
-                })"
-                
-                # Wait for member to initialize
-                until mongo --host $pod.web-mongodb-headless --eval "db.adminCommand(\"ping\")" >/dev/null; do
-                  echo "Waiting for $pod to be ready..."
-                  sleep 5
-                done
-              fi
-            done
-          fi
-          
-          # Remove extra members (scaling down)
-          if [ $current_replicas -lt $member_count ]; then
-            echo "Scaling DOWN: Removing $((member_count - current_replicas)) members"
-            
-            # Get list of all current pod names
-            current_pods=$(kubectl get pods -l app=web-mongodb -o jsonpath='{.items[*].metadata.name}' | sort -V)
-            
-            # Get replica set members
-            members=$(mongo --host $primary --eval "rs.status().members.map(m => m.name)" --quiet | sed 's/"//g' | tr -d '[]' | tr ',' '\n' | sed 's/^ *//; s/ *$//')
-            
-            # Remove members for pods that no longer exist
-            for member in $members; do
-              # Extract pod name from member string (web-mongodb-0.web-mongodb-headless:27017 → web-mongodb-0)
-              pod_name=${member%%.*}
-              
-              # Check if pod still exists
-              if ! echo "$current_pods" | grep -wq "$pod_name"; then
-                echo "Removing member $member"
-                mongo --host $primary --eval "rs.remove('$member')"
-              fi
-            done
-          fi
-          
-          # Reconfigure voting members if needed
-          if [ $current_replicas -ne $member_count ]; then
-            echo "Reconfiguring voting members"
-            mongo --host $primary --eval "
-              var conf = rs.conf();
-              conf.version++;
-              conf.members.forEach((m, idx) => {
-                m.priority = idx < 7 ? 1 : 0;  // First 7 are eligible to be primary
-                m.votes = idx < 7 ? 1 : 0;     // First 7 get voting rights
-              });
-              rs.reconfig(conf, {force: true});
-            "
-          fi
-          
-          echo "Replica set scaling complete"
+        command: ["/bin/bash","/script/scale-mongo.sh"]
+        volumeMounts:
+        - name: mongo-script
+          mountPath: /script
+      volumes:
+      - name: mongo-script
+        configMap:
+          name: mongo-scale-script-cm
+          defaultMode: 0744
+```
+
+We observe logs of the job and mongo members
+```bash
+kubectl logs -f job/mongo-scale-job
+kubectl exec web-mongodb-0 -- mongo --eval "rs.status().members.forEach(m => print(m.name + ' - ' + m.stateStr))"
 ```
 What does this voting members do?
 1. **Retrieves the current replica set configuration**: `rs.conf()`.
