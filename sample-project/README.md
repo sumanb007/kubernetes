@@ -658,6 +658,8 @@ kubectl autoscale deployment backend --cpu-percent=70 --min=2 --max=10
 ```
 
 ### Or equivalent manifest for HPA we have :
+
+We add these to respective frontend and backend manifest file.
 ```yaml
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
@@ -1843,6 +1845,128 @@ Why is this done?
 - This script enforces that the first 7 members (by their index in the configuration array) are voting members, and any additional members are non-voting.
 
 ---
+### 5.3.5 Automating sts Scaling
+
+Our above script involves installing 'kubectl' in the mongo image and then proceeds further. This leads frequent installing of 'kubectl' every time when scaling and can fail to scale before job completion.
+
+So we have to set up a custom image with kubectl pre-installed and update the job to use that image.
+
+Let's use docker to customize image.
+```Dockerfile
+FROM mongo:4.0.28
+
+RUN apt-get update && apt-get install -y curl \
+    && curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" \
+    && chmod +x kubectl && mv kubectl /usr/local/bin/
+```
+
+Now, build and push to our private repository.
+```bash
+docker build -t 192.168.1.110:5050/mongo-kubectl:4.0.28 .
+docker push 192.168.1.110:5050/mongo-kubectl:4.0.28 
+```
+
+Then we change the image in `mongo-scale-job.yml` and delete the kubectl installation line `scale-mongo.sh`
+
+Finally we recreate respective ConfigMap and  create deployment pod to watch and automate scaling.
+
+```bash
+kubectl create cm mongo-scale-script-cm --from-file=scale-mongo.sh
+kubectl create cm mongo-scale-job-cm --from-file=mongo-scale-job.yml
+```
+
+Now we create new script to watch the sts scaling so that it will trigger job ConfigMap: 'mongo-scale-job-cm'  and then to our scaling script 'scale-mongo.sh'
+
+`scale-mongo-auto.sh`
+```bash
+#!/bin/bash
+
+echo "Watching StatefulSet for replica changes..."
+
+current_replicas=$(kubectl get sts web-mongodb -o jsonpath='{.spec.replicas}')
+
+while true; do
+  new_replicas=$(kubectl get sts web-mongodb -o jsonpath='{.spec.replicas}')
+
+  # Check if the replica count has changed
+  if [ "$new_replicas" != "$current_replicas" ]; then
+    echo "Scale change detected: $current_replicas -> $new_replicas"
+
+#    # Send email notification
+#    echo "MongoDB scaling triggered: $current_replicas -> $new_replicas" | mail -s "MongoDB Scaling Event" admin@example.com
+
+    
+    # Implementing locking to prevent concurrent scaling
+    if kubectl get configmap scaling-lock >/dev/null 2>&1; then
+      echo "Scaling already in progress. Skipping..."
+      current_replicas=$new_replicas
+      continue
+    else
+      kubectl create configmap scaling-lock
+    fi
+
+    kubectl delete job mongo-scale-job --ignore-not-found
+    kubectl create -f /job/mongo-scale-job.yml
+
+    # Clean up lock
+    kubectl delete configmap scaling-lock --ignore-not-found
+
+  fi
+
+  sleep 10
+done
+```
+
+```bash
+kubectl create cm mongo-scale-watcher-cm --from-file=scale-mongo-auto.sh
+```
+
+This, deployment wil trigger out jobs
+
+`mongo-scale-watcher-deploy.yml`
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mongo-scale-watcher
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongo-scale-watcher
+  template:
+    metadata:
+      labels:
+        app: mongo-scale-watcher
+    spec:
+      serviceAccountName: mongo-scale-watcher-sa
+      containers:
+      - name: watcher
+        image: bitnami/kubectl:latest
+        command: ["/bin/bash", "/watcher/scale-mongo-auto.sh"]
+        volumeMounts:
+        - name: watcher-script
+          mountPath: /watcher
+        - name: job-manifest
+          mountPath: /job
+      volumes:
+      - name: watcher-script
+        configMap:
+          name: mongo-scale-watcher-cm
+      - name: job-manifest
+        configMap:
+          name: mongo-scale-job-cm
+```
+
+verify the scale and logs now.
+```bash
+kubectl scale sts web-mongodb --replicas=5
+kubectl logs mongo-scale-watcher-85cdd797c7-p9c54 -f
+kubectl exec web-mongodb-0 -- mongo --eval "rs.status().members.forEach(m => print(m.name + ' - ' + m.stateStr))"
+```
+
+---
+
 ### Let's verify the application reachability now.
 
 ```bash
