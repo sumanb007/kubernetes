@@ -1917,11 +1917,14 @@ while true; do
 done
 ```
 
+**Let's create its ConfigMap**
+
 ```bash
 kubectl create cm mongo-scale-watcher-cm --from-file=scale-mongo-auto.sh
 ```
 
-This, deployment wil trigger out jobs
+
+This, deployment wil trigger our jobs
 
 `mongo-scale-watcher-deploy.yml`
 ```yaml
@@ -1957,6 +1960,41 @@ spec:
         configMap:
           name: mongo-scale-job-cm
 ```
+Finally, we implement RBAC for the watcher pod.
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mongo-scale-watcher-sa
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: mongo-scale-watcher-role
+rules:
+- apiGroups: ["apps"]
+  resources: ["statefulsets"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: ["batch"]
+  resources: ["jobs"]
+  verbs: ["create", "delete"]
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["create", "delete", "get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: mongo-scale-watcher-rolebinding
+subjects:
+- kind: ServiceAccount
+  name: mongo-scale-watcher-sa
+roleRef:
+  kind: Role
+  name: mongo-scale-watcher-role
+  apiGroup: rbac.authorization.k8s.io
+```
 
 verify the scale and logs now.
 ```bash
@@ -1965,6 +2003,126 @@ kubectl logs mongo-scale-watcher-85cdd797c7-p9c54 -f
 kubectl exec web-mongodb-0 -- mongo --eval "rs.status().members.forEach(m => print(m.name + ' - ' + m.stateStr))"
 ```
 
+### Watcher Script Enhancement:
+
+From the above watcher script: `scale-mongo-auto.sh` there seems still some more to enhance.
+- The log of the watcher pod is growing and accumulating in every iterations potentially consuming disk space, need to prevent it.
+- What if the statefulset is not found ? We need to add that condition too.
+- The script triggers repeatedely for even a same change. We prevent that too.
+- What if there's concurrent scaling triggered ? For this we lock one scale operations and only allow another operation after first one completes.
+
+1. **So to prevent the logs in the watcher pod to accumulate indefinitely, we add below code:**
+ 
+     ```bash
+     # clearing previous logs periodically
+     log_cleanup_counter=0
+     while true; do
+       # cleaning logs every 10 iterations (100 seconds)
+       if ((log_cleanup_counter % 10 == 0)); then
+         > /proc/1/fd/1  # Clear container logs
+       fi
+       ((log_cleanup_counter++))
+       ...
+     ```
+     **How it works**: Every 10 iterations (approximately 100 seconds), the script clears the standard output of the container. This prevents the logs from growing indefinitely.
+
+ 2. **We added error handling to retry when the StatefulSet is not found.**
+
+     ```bash
+     new_replicas=$(kubectl get sts web-mongodb -o jsonpath='{.spec.replicas}' 2>/dev/null)
+     
+     # handling StatefulSet not found
+     if [ -z "$new_replicas" ]; then
+       echo "StatefulSet web-mongodb not found. Retrying in 30 seconds..."
+       sleep 30
+       continue
+     fi
+     ```
+     The command to get the replica count now suppresses errors (using `2>/dev/null`). If the result is empty, the script waits 30 seconds and then retries.
+ 
+ 3. **The script triggers multiple scaling jobs for the same change because it did not update `current_replicas` until after the job was created. This caused a loop of job creations.**
+
+    So to solve, we update `current_replicas` immediately after detecting a change, before triggering the job.
+
+     ```bash
+     if [ "$new_replicas" != "$current_replicas" ]; then
+       echo "Scale change detected: $current_replicas -> $new_replicas"
+       
+       # updating current_replicas BEFORE triggering job
+       current_replicas=$new_replicas
+       ...
+
+     ```
+     By updating `current_replicas` right after detecting a change, we prevent the same change from being detected again in the next loop iteration.
+
+ 4. If a scaling is triggered while another is still in progress, this will lead to potentional other problems.
+
+    So we implement a file-based lock to ensure only one scaling operation runs at a time.
+
+     ```bash
+     LOCK_FILE="/tmp/scaling.lock"
+     
+     # Cleanup function to remove lock
+     cleanup() {
+       rm -f "$LOCK_FILE"
+       echo "Lock released"
+     }
+     
+     trap cleanup EXIT
+     
+     ...
+     
+     if [ "$new_replicas" != "$current_replicas" ]; then
+       ...
+       # file-based locking
+       if [ -f "$LOCK_FILE" ]; then
+         echo "Scaling already in progress. Skipping..."
+         continue
+       else
+         touch "$LOCK_FILE"
+         echo "Lock acquired"
+       fi
+       ...
+
+       # cleaning up lock
+       rm -f "$LOCK_FILE"
+       echo "Lock released"
+     
+       ...
+     ```
+
+    **How it works**:
+    
+    - We define a lock file at `/tmp/scaling.lock`, which is just an empty file.  
+      The file doesn't need to contain anything — only its *presence* matters.
+    
+    - In every loop, the script checks whether the replica count has changed.  
+      If there's a change, we proceed to the scaling logic.
+    
+    - Before triggering any scaling operation, the script checks whether the lock file already exists:
+      - If the lock file **does not exist**:
+        - The script creates it using `touch` (this means we are acquiring the lock).
+        - It then proceeds to create the scaling job.
+      - If the lock file **already exists**:
+        - It assumes that a scaling operation is already in progress.
+        - So it skips this iteration and waits for the next loop.
+    
+    - The lock file helps prevent multiple scaling operations from running at the same time.
+    
+    - A `cleanup` function is defined to delete the lock file once the script exits/succeeds because the leftover lock file will cause the script to skip all future scale actions.
+    
+    - The line `trap cleanup EXIT` ensures if any error or exit singal occurs (like normal exit, or crash,  or manual termination: `Ctrl+C`) trap caches it , thent triggers cleanup function to automatically run future scale can happen.
+      This prevents leftover lock files from blocking future scaling events.
+    
+
+### Summarizing Automation Implementation in order:
+1. Wrote `scale-mongo.sh`
+2. Created ConfigMaps `mongo-scale-script-cm`
+3. Wrote `scale-mongo-auto.sh`
+4. Created ConfigMaps `mongo-scale-watcher-cm`
+5. Created ConfigMaps `mongo-scale-job-cm` from job: `mongo-scale-job.yml`
+6. Deployed watcher pod: `mongo-scale-watcher-deploy.yml`
+   
 ---
 
 ### Let's verify the application reachability now.
