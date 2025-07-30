@@ -1,6 +1,6 @@
 
 
-# Orchestrating Containerized Application
+# Orchestrating Containerized Application On-premise
 
 Now let's continue further to orchestrate [Application](https://github.com/sumanb007/crud-webapplication/blob/main/README.md) containers using Kubernetes.
 
@@ -10,27 +10,39 @@ As planned in project, let's first:
 2. Ensure NFS is setup in every cluster host. (like [here](https://github.com/sumanb007/Labs/blob/main/NFS%20setup.md))
 3. Setup Cluster to Trust Private Registry with TLS. (like [here](https://github.com/sumanb007/kubernetes/blob/master/README.md#d-setting-up-cluster-to-trust-private-registry-with-tls))
 
-### Table of Conents
+## Table of Contents
 
+
+   [Planning](#planning)
 1. [Setting Up Persistent Volumes with NFS](#1-setting-up-persistent-volumes-with-nfs)
 2. [Creating Deployment and Service YAMLs](#2-creating-deployment-and-service-yamls)
 3. [Ingress and TLS Setup](#3-ingress-and-tls-setup)  
     3.1. [MetalLB Setup](#31-metallb-setup)  
     3.2. [Nginx-ingress controller and Ingress resource](#32-nginx-ingress-controller-and-ingress-resource)  
     3.3. [TLS for Secure HTTPS Access](#33-tls-for-secure-https-access)
-4. [Testing the Cluster](#4-testing-the-cluster)
-5. [Scaling and Resource Limits](#5-scaling-and-resource-limits)  
-    5.1. [Resources Limits](#51-resources-limits)  
-    5.2. [Implementing Horizontal Pod Autoscaler (HPA)](#52-implementing-horizontal-pod-autoscaler-hpa)
-6. [Pod Security and Network Policy](#6-pod-security-and-network-policy)  
-    6.1. [Using securityContext](#61-using-securitycontext)  
-    6.2. [Using Network Policy](#62-using-network-policy)
+4. [Scaling and Resource Limits](#4-scaling-and-resource-limits)  
+    4.1. [Resources Limits](#41-resources-limits)  
+    4.2. [Implementing Horizontal Pod Autoscaler (HPA)](#42-implementing-horizontal-pod-autoscaler-hpa)
+5. [Pod Security and Network Policy](#5-pod-security-and-network-policy)  
+    5.1. [Using securityContext](#51-using-securitycontext)  
+    5.2. [Using Network Policy](#52-using-network-policy)
+6. [Setting Mongo As Statefulset](#6-setting-mongo-as-statefulset)  
+    6.1. [Installing NFS Provisioner](#61-installing-nfs-provisioner)  
+    6.2. [StorageClass and PVC Provisioning](#62-storageclass-and-pvc-provisioning)  
+    6.3. [Mongo StatefulSet](#63-mongo-statefulset)  
+    6.4. [ConfigMaps & Scripting Mongo init/scale Jobs](#64-configmaps--scripting-mongo-initscale-jobs)  
+    6.5. [Automating sts Scaling](#65-automating-sts-scaling)
 7. [Actual Orchestration](#7-actual-orchestration)
 
 
 
 
+
 ---
+## Planning
+
+
+
 ## 1. Setting Up Persistent Volumes with NFS
 
 Though hardcoding NFS in pod is simple and easy to use, it has some key limitations:
@@ -338,7 +350,9 @@ spec:
 ---
 ### 3.3. TLS for Secure HTTPS Access
 
-For real-world scenario, let's replace self-signed certificate with below options:
+For real-world scenario, it's recommended to use various trusted sources (e.g,;Let's Encrypt, HashiCorp Vault, or private CAs.)
+
+Here
 
 ### Option 1: Permanent Solution for Kubernetes Nodes
 Install the CA certificate on all cluster nodes:
@@ -386,8 +400,8 @@ Then later `curl` with '-k' option as encryption does not allow anyother host to
 
    Verify it
    ```bash
-   kubectl get issuer selfsigned-issuer -n default
-   kubectl describe issuer selfsigned-issuer -n default
+   kubectl get issuer selfsigned-issuer
+   kubectl describe issuer selfsigned-issuer
    ```
 
 
@@ -474,8 +488,8 @@ Then later `curl` with '-k' option as encryption does not allow anyother host to
      ```bash
      kubectl get secret app-tls-secret -o jsonpath='{.data.tls\.crt}' | base64 -d | openssl x509 -text -noout
      ```
----     
-## 4. Testing the Cluster 
+---    
+### Testing the Cluster 
 
 - Verify service endpoints
   `kubectl get endpoints`
@@ -560,13 +574,14 @@ Then later `curl` with '-k' option as encryption does not allow anyother host to
   curl https://app.example.com/students
   ```
 ---
-## 5. Scaling and Resource Limits
+## 4. Scaling and Resource Limits
+
 To ensure reliable performance under varying load conditions, lets implement:
 - High availability, if one pod fails, another continues serving traffic. `replicas:2`
 - Manage resource requests and limits to prevent any one pod from consuming excessive resources and impacting neighbors.
 - Ensure the service only receives traffic when the app is fully initialized and setup to restart the pod if it becomes unresponsive, improving resilience.
 
-### 5.1. Resources Limits
+### 4.1. Resources Limits
 
 Before proceeding, let's deploy metrics then we find out how much of the minimun resources is used when just a pod is up.
 
@@ -640,7 +655,7 @@ Before proceeding, let's deploy metrics then we find out how much of the minimun
    kubectl get pod web-mongodb-76c57d566d-mtp6l -o yaml | grep -A6 "resources:"
    ```
 ---
-### 5.2. Implementing Horizontal Pod Autoscaler (HPA)
+### 4.2. Implementing Horizontal Pod Autoscaler (HPA)
 
 - Let's use HPA for scaling efficiency. We will scale frontend and backned pods when the usage is 70% of the requested resources.
   
@@ -704,7 +719,7 @@ Let's verify now
 kubectl get hpa
 ```
 ---
-## 6. Pod Security and Network Policy
+## 5. Pod Security and Network Policy
 
 Here, we will enforce below for Security:
 - Enforce non-root execution using `runAsNonRoot`, `runAsUser`
@@ -714,7 +729,7 @@ Here, we will enforce below for Security:
 - Limit pod communication using `Network Policy`
 
 ---
-### 6.1. Using securityContext
+### 5.1. Using securityContext
 
 We first structure into two levels:
 - Pod-level: Identity and volume permissions (same across containers)
@@ -858,7 +873,7 @@ Let's address each service:
 
    
 ---
-### 6.2. Using Network Policy
+### 5.2. Using Network Policy
 
 By default, if no policies are defined, all pods can communicate with each other. This is a security risk because if one pod is compromised, an attacker can easily access other pods.
 
@@ -979,7 +994,7 @@ spec:
       port: 27017
 ```
 ---
-## 5.3. Scaling Mongo As Statefulset
+## 6. Setting Mongo As Statefulset
 
 The key difference is that the StatefulSet is designed for distributed databases and requires replica set configuration for multiple instances, while the Deployment uses a single MongoDB instance without replica set.
 
@@ -1038,7 +1053,7 @@ We will design our goal in Steps:
  6. Use a headless service for StatefulSet.
 
 ---
-### 5.3.1 Install NFS Provisioner
+### 6.1. Installing NFS Provisioner
 
 - First, we allows egress from all pods in the default namespace to the master node's IP (192.168.1.11) on port 6443. Why ? Because we have blocked the all default traffic in above network policies. 
 
@@ -1192,7 +1207,7 @@ The StatefulSet ensures that each pod gets a stable network identity and stable 
   - API server is responding.
 
 ---
-### 5.3.2 StorageClass and PVC Provisioning
+### 6.2. StorageClass and PVC Provisioning
 
 **StorageClass**
 
@@ -1244,7 +1259,8 @@ Key Field to Look For:
 `Claim:`
 This field shows the PVC that the PV is bound to in the format: namespace/pvc-name
 
-### 5.3.3 Mongo StatefulSet
+---
+### 6.3. Mongo StatefulSet
 
 We are replacing the Deployment with a StatefulSet (sts). 
 
@@ -1530,7 +1546,7 @@ This forcibly overwrites the current replica set configuration with exactly the 
 
 
 ---
-### 5.3.4 ConfigMaps & Scripting Mongo init/scale Jobs
+### 6.4. ConfigMaps & Scripting Mongo init/scale Jobs
 
 ### Init Job
 
@@ -1839,7 +1855,7 @@ Why is this done?
 - This script enforces that the first 7 members (by their index in the configuration array) are voting members, and any additional members are non-voting.
 
 ---
-### 5.3.5 Automating sts Scaling
+### 6.5. Automating sts Scaling
 
 Our above script involves installing 'kubectl' in the mongo image and then proceeds further. This leads frequent installing of 'kubectl' every time when scaling and can fail to scale before job completion.
 
@@ -2183,27 +2199,5 @@ Test if the application works when whole cluster is rebooted. Since we have depl
 ```bash
 HOST rebooted
 ```
- 
 
 
-Required Files Summary
-nfs-rbac.yml - RBAC permissions
-nfs-provisioner.yml - Deployment with service account reference
-networkPolicy.yml - Contains allow-apiserver-access policy
-nfs-storageclass.yml - StorageClass definition
-test-pvc.yml - Test PVC for verification
-Key Lessons Learned
-
-RBAC is Critical: Provisioners require explicit permissions to manage storage resources
-Network Isolation Matters: Network policies can block API server access
-Service Accounts: Must be explicitly referenced in deployments
-Cluster Networking: Service network routes must be properly configured
-Order of Operations:
-RBAC before deployment
-Network policies before pod creation
-StorageClass before PVC creation
-
-
-### Setup above Application in custom namespace
-### Automating , Penetration Testing in Kubernetes ###
-### Automating pod scale up if resources is high ###
