@@ -379,7 +379,6 @@ Then later `curl` with '-k' option as encryption does not allow anyother host to
    kind: Issuer
    metadata:
      name: selfsigned-issuer
-     namespace: default
    spec:
      selfSigned: {}
    EOF
@@ -399,7 +398,6 @@ Then later `curl` with '-k' option as encryption does not allow anyother host to
    kind: Certificate
    metadata:
      name: app-tls
-     namespace: default
    spec:
      secretName: app-tls-secret
      duration: 8760h # 1 year
@@ -1051,7 +1049,6 @@ We will design our goal in Steps:
   kind: NetworkPolicy
   metadata:
     name: allow-apiserver-access
-    namespace: default
   spec:
     podSelector: {}
     policyTypes:
@@ -1097,7 +1094,6 @@ We will design our goal in Steps:
     kind: ServiceAccount
     metadata:
       name: nfs-provisioner
-      namespace: default
     ---
     apiVersion: rbac.authorization.k8s.io/v1
     kind: ClusterRole
@@ -1118,7 +1114,6 @@ We will design our goal in Steps:
     subjects:
     - kind: ServiceAccount
       name: nfs-provisioner
-      namespace: default
     roleRef:
       kind: ClusterRole
       name: nfs-provisioner-role
@@ -1143,7 +1138,6 @@ The StatefulSet ensures that each pod gets a stable network identity and stable 
     kind: Deployment
     metadata:
       name: nfs-provisioner
-      namespace: default
     spec:
       replicas: 1
       selector:
