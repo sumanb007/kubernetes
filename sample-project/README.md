@@ -32,7 +32,8 @@ As planned in project, let's first:
     6.3. [Mongo StatefulSet](#63-mongo-statefulset)  
     6.4. [ConfigMaps & Scripting Mongo init/scale Jobs](#64-configmaps--scripting-mongo-initscale-jobs)  
     6.5. [Automating sts Scaling](#65-automating-sts-scaling)
-7. [Actual Orchestration](#7-actual-orchestration)
+7. [Backup and Restoring Data](#7-backup-and-restoring-data) 
+8. [Actual Orchestration](#7-actual-orchestration)
 
 
 
@@ -41,7 +42,17 @@ As planned in project, let's first:
 ---
 ## Planning
 
+We are starting over with creation of dedicated namespace for our application to isolate it from other workloads in the cluster, resource isolation, simplified cleanup environment segregation (future dev/staging namespaces).
 
+The namespace will be named `crud-webapplication`.
+
+Stepwise we will:
+ - Configure static Persistent Storages, all deployment yaml files for workaround.
+ - Expose application with Ingress.
+ - Implement scaling
+ - Harden Application Security
+ - Finally we deploy mongo statefulset to simulate production based environment.
+ - Demonstrate data restoration from persistent storage when potential cluster change or disaster occurs.
 
 ## 1. Setting Up Persistent Volumes with NFS
 
@@ -2199,5 +2210,17 @@ Test if the application works when whole cluster is rebooted. Since we have depl
 ```bash
 HOST rebooted
 ```
+---
+## 7. Backup and Restoring Data
 
+We moved the application to a new namespace 'crud-webapplication' from 'default' namespace, and the MongoDB StatefulSet in the new namespace is using new PersistentVolumeClaims (PVCs). 
 
+PVCs are always namespace-scoped. Since the old data is in the old PVCs, we need to migrate that data to the new PVCs in the new namespace.
+
+We have several options out of which :
+- Either **reuse the old PVs by updating the PVCs in the new namespace to bind to the old PVs**.
+   - This requires manually creating PVCs in the new namespace that are bound to the existing PVs (which were used in the default namespace).
+- Or, **Copy the data from the old PVs to the new PVs**.
+   - This can be done by creating a temporary data migration pod that mounts both the old PVC and the new PVC and copies the data.
+
+The second option is more safer, 
