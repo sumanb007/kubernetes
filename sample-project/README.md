@@ -450,7 +450,20 @@ Then later `curl` with '-k' option as encryption does not allow anyother host to
      secretName: app-tls-secret  # matching secretName in Certificate
    ```
    
-6. Now, verify:
+6. Also we set up a self-signed certificate and add it to the system's trust store. Extract the certificate from the secret
+
+    ```bash
+   kubectl get secret app-tls-secret -n crud-webapplication -o jsonpath='{.data.tls\.crt}' | base64 -d > app-tls.crt
+   sudo cp app-tls.crt /usr/local/share/ca-certificates/
+   sudo update-ca-certificates
+    ```
+
+    verify certificate validation:
+    ```bash
+    openssl x509 -in app-tls.crt -text -noout | grep -E 'Subject:|DNS:|IP Address:'
+    ```
+
+7. Now, verify:
 
    - Check certificate status: 
      ```bash
@@ -472,7 +485,7 @@ Then later `curl` with '-k' option as encryption does not allow anyother host to
      curl -k https://app.example.com  # Works immediately
      ```
 
-7. Full Trust Setup
+8. Full Trust Setup
    - Extract CA Certificate: 
      ```bash
      kubectl get secret app-tls-secret -o jsonpath='{.data.ca\.crt}' | base64 -d > ca.crt
@@ -484,7 +497,7 @@ Then later `curl` with '-k' option as encryption does not allow anyother host to
      sudo update-ca-certificates
      ```
      
-8. Now let's verify TLS
+9. Now let's verify TLS
    - Check cert-manager logs: 
      ```bash
      kubectl logs -n cert-manager -l app.kubernetes.io/instance=cert-manager
@@ -2222,5 +2235,6 @@ We have several options out of which :
    - This requires manually creating PVCs in the new namespace that are bound to the existing PVs (which were used in the default namespace).
 - Or, **Copy the data from the old PVs to the new PVs**.
    - This can be done by creating a temporary data migration pod that mounts both the old PVC and the new PVC and copies the data.
+The second option is more safer, because it does not require changing the PV bindings. Also, it leaves the old data intact as a backup.
 
-The second option is more safer, 
+So we start scaling down the MongoDB StatefulSet in the new namespace. This ensures that the MongoDB pods are not running while we copy the data and prevents data corruption during backup.
