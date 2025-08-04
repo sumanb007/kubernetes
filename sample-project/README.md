@@ -2,7 +2,7 @@
 
 # Orchestrating Containerized Application On-premise
 
-Now let's continue further to orchestrate [Application](https://github.com/sumanb007/crud-webapplication/blob/main/README.md) containers using Kubernetes.
+Now let's continue further to orchestrate [Application](https://github.com/sumanb007/crud-webapplication/blob/main/README.md) containers on-premise using Kubernetes.
 
 ## Project Walkthrough
 As planned in project, let's first:
@@ -2226,7 +2226,7 @@ HOST rebooted
 ---
 ## 7. Backup and Restoring Data
 
-We moved the application to a new namespace 'crud-webapplication' from 'default' namespace, and the MongoDB StatefulSet in the new namespace is using new PersistentVolumeClaims (PVCs). 
+We moved the application to a new namespace 'crud-webapplication' from 'default' namespace, and the MongoDB StatefulSet in the new namespace is uses new PersistentVolumeClaims (PVCs). 
 
 PVCs are always namespace-scoped. Since the old data is in the old PVCs, we need to migrate that data to the new PVCs in the new namespace.
 
@@ -2237,4 +2237,19 @@ We have several options out of which :
    - This can be done by creating a temporary data migration pod that mounts both the old PVC and the new PVC and copies the data.
 The second option is more safer, because it does not require changing the PV bindings. Also, it leaves the old data intact as a backup.
 
-So we start scaling down the MongoDB StatefulSet in the new namespace. This ensures that the MongoDB pods are not running while we copy the data and prevents data corruption during backup.
+   
+   List the old PVCs used by the MongoDB StatefulSet in the default namespace.
+   ```bash
+   kubectl -n default get pvc -l app=web-mongodb
+   kubectl -n crud-webapplication get pvc,pv -l app=web-mongodb
+   ```
+
+   ### 1: First we scale down the MongoDB StatefulSet in the new namespace
+   
+   This ensures that the MongoDB pods are not running while we copy the data and prevents data corruption during backup.
+   ```bash
+   kubectl -n crud-webapplication scale sts web-mongodb --replicas=0
+   ```
+
+
+  
